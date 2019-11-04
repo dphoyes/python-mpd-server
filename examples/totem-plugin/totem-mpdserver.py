@@ -22,7 +22,7 @@ class MpdServerPlugin(GObject.Object, Peas.Activatable):
 		self.totem = None
 		self.window = None
 
-	
+
 	def do_activate(self):
 		self.totem = self.object
 		self.mpd=mpdserver.MpdServerDaemon(9999)

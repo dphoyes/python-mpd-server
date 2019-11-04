@@ -17,7 +17,7 @@ setup(name='python-mpd-server',
         'Topic :: Multimedia :: Sound/Audio :: Players',
         'Topic :: Software Development :: Libraries :: Python Modules'],
       long_description="""
-python-mpd-server permits to bind a player to a `MPD server <http://mpd.wikia.com>`_. 
+python-mpd-server permits to bind a player to a `MPD server <http://mpd.wikia.com>`_.
 
 You can control your player with a MPD client such as `Sonata
 <http://sonata.berlios.de/>`_, `Gmpc <http://gmpc.wikia.com/wiki/>`_ or a command line tool `mpc <http://mpd.wikia.com/wiki/Client:Mpc>`_. This module

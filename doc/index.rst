@@ -9,7 +9,7 @@
 
 
 Welcome to python-mpd-server's documentation!
-============================================= 
+=============================================
 .. include:: readme.rst
 
 How to use it
@@ -23,7 +23,7 @@ To launch the server, you just have to create a Mpd object ::
 
    mpd=mpdserver.Mpd(listening_port)
 
-This simulates a dummy mpd server which works with sonata, mpc and gmpc. 
+This simulates a dummy mpd server which works with sonata, mpc and gmpc.
 To bind an existing player with mpd commmand, you then have to redefine commands.
 For example, to bind play command with your player ::
 

@@ -14,7 +14,7 @@ class Play(Command):
 class Pause(Command):
     """ Override :func:`handle_pause` and :func:`handle_unpause` method """
     formatArg=[('state',int)]
-    def handle_args(self,state): 
+    def handle_args(self,state):
         if state==1:
             self.handle_pause()
         else :
@@ -32,9 +32,9 @@ class Seek(Command):
 
 class Outputs(CommandItems):
     def items(self):
-        return [('outputid',0),        # <int output> the output number                              
+        return [('outputid',0),        # <int output> the output number
                 ('outputname','test'), # <str name> the name as defined in the MPD configuration file
-                ('outputenabled',1)    # <int enabled> 1 if enabled, 0 if disabled                   
+                ('outputenabled',1)    # <int enabled> 1 if enabled, 0 if disabled
                 ]
 
 class CurrentSong(CommandSongs):pass
@@ -47,18 +47,18 @@ class Stats(CommandItems):
                 ("uptime",-1),  #daemon uptime (time since last startup) in seconds
                 ("playtime",-1),  #time length of music played
                 ("db_playtime",-1),  #sum of all song times in db
-                ("db_update",-1)]  #last db update in UNIX time 
+                ("db_update",-1)]  #last db update in UNIX time
 
 class Status(CommandItems):
     """ Manage mpd status """
     def helper_status_common(self,volume=0,repeat=0,random=0,xfade=0):
         "Status is set to 'stop' by default. Use :method:play or :method:pause to set status"
-        return [('volume',volume), #(0-100)  
-                ('repeat',repeat), #(0 or 1) 
-                ('random',random), #(0 or 1) 
+        return [('volume',volume), #(0-100)
+                ('repeat',repeat), #(0 or 1)
+                ('random',random), #(0 or 1)
                 ('playlist',self.playlist.version()), #(31-bit unsigned integer, the playlist version number)
-                ('playlistlength',self.playlist.length()),   #(integer, the length of the playlist)                 
-                ('xfade',xfade)]                     #(crossfade in seconds)                                
+                ('playlistlength',self.playlist.length()),   #(integer, the length of the playlist)
+                ('xfade',xfade)]                     #(crossfade in seconds)
 #               ('bitrate') + #<int bitrate> (instantaneous bitrate in kbps)
 #               ('audio') + #<int sampleRate>:<int bits>:<int channels>
 #               ('updating_db') + #<int job id>
@@ -70,7 +70,7 @@ class Status(CommandItems):
         "Status is set to 'stop' by default. Use :method:play or :method:pause to set status"
         return (self.helper_status_common(volume,repeat,random,xfade) +
                 [('state',"stop")]) #("play", "stop", or "pause")
-    
+
     def helper_status_play(self,volume=0,repeat=0,random=0,xfade=0,elapsedTime=10,durationTime=100,playlistSongNumber=-1,playlistSongId=-1):
         return (self.helper_status_common(volume,repeat,random,xfade) +
                 [('state',"play"),
@@ -117,8 +117,8 @@ class DeleteId(Command): # Since 0.12
     def handle_args(self,songId):
         self.playlist.deleteId(songId)
 
-        
-    
+
+
 class ListPlaylistInfo(CommandSongs): # Since 0.12
     """ List playlist 'playlistname' content """
     formatArg=[('playlistName',str)]
@@ -156,12 +156,12 @@ class PlaylistId(CommandSongs):
 
 class SetVol(Command):
     formatArg=[('volume',int)]
-    
+
 class PlChanges(CommandSongs):
     formatArg=[('playlistVersion',int)]
     def songs(self):
         return self.playlist.generateMpdPlaylistDiff(self.args['playlistVersion'])
-    
+
 class PlChangesPosId(CommandItems):
     formatArg=[('playlistVersion',int)]
     def items(self):

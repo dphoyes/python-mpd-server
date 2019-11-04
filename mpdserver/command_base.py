@@ -1,4 +1,4 @@
-""" 
+"""
 This module permits to define mpd commands. Each command inherits from
 :class:`Command` which is a command base class. There are
 also some specialized subclasses of :class:`Command`:
@@ -10,7 +10,7 @@ also some specialized subclasses of :class:`Command`:
 MPD songs are represented by classes:
 
 - :class:`MpdPlaylistSong` which contains a song position and a song id.
-- :class:`MpdLibrarySong` 
+- :class:`MpdLibrarySong`
 
 Moreover, you can map your playlist to the mpd playlist by overriding
 :class:`MpdPlaylist`. Then when you override this class, a lot of
@@ -34,7 +34,7 @@ logger=mpdserver.logging
 
 
 class CommandArgumentException(Exception):pass
-        
+
 
 class Command():
     """ Command class is the base command class. You can define
@@ -48,7 +48,7 @@ class Command():
     :class:`Command` contains command
     arguments definition via :attr:`Command.formatArg`. You can handle
     them with :func:`Command.handle_args`. An argument is :
-    
+
     - an int
     - a string
     - an optionnal int (:class:`OptInt`)
@@ -61,8 +61,8 @@ class Command():
     listArg=False
     respond=True
     """ To specify command arguments format. For example, ::
-    
-       formatArg=[("song",OptStr)] 
+
+       formatArg=[("song",OptStr)]
 
     means command accept a optionnal
     string argument bound to `song` attribute name."""
@@ -84,7 +84,7 @@ class Command():
             return self.toMpdMsg()
         except NotImplementedError as e:
             raise mpdserver.CommandNotImplemented(self.__class__,str(e))
-        
+
     @classmethod
     def GetCommandName(cls):
         """ MPD command name. Command name is the lower class
@@ -114,14 +114,14 @@ class Command():
                     try:
                         d.update({self.formatArg[i][0] : self.formatArg[i][1](args[i])})
                     except IndexError : pass
-                else:                        
+                else:
                     d.update({self.formatArg[i][0] : self.formatArg[i][1](args[i])})
-        except IndexError : 
+        except IndexError :
             raise CommandArgumentException("Not enough arguments: %s command arguments should be %s instead of %s" %(self.__class__,self.formatArg,args))
         except ValueError as e:
             raise CommandArgumentException("Wrong argument type: %s command arguments should be %s instead of %s (%s)" %(self.__class__,self.formatArg,args,e))
         return d
-    
+
     def handle_args(self,**kwargs):
         """ Override this method to treat commands arguments."""
         logger.debug("Parsing arguments %s in %s" % (str(kwargs),str(self.__class__)))
@@ -152,17 +152,17 @@ class CommandItems(Command):
 class CommandSongs(Command):
     """ This is a subclass of :class:`Command` class. Respond songs
     informations for mpd clients."""
-    def songs(self): 
+    def songs(self):
         """ Override it to adapt this command. This must return a list of
         :class:`MpdPlaylistSong` """
         return [] #self.helper_mkSong("/undefined/")
     def toMpdMsg(self):
         return ''.join([MpdPlaylistSong.toMpdMsg(s) for s in self.songs()])
-        
+
 class CommandPlaylist(CommandSongs):
     """ This class of commands is used on mpd internal playlist."""
     def songs(self):
-        """ Overide it to specify a real playlist. 
+        """ Overide it to specify a real playlist.
         Should return a list of dict song informations"""
         return [] # self.playlist.generateMpdPlaylist()
 
@@ -234,17 +234,17 @@ class OptStr(Opt,types.StringType):
 class PlaylistHistory(object):
     """ Contains all playlist version to generate playlist diff (see
     plchanges* commands). This class is a singleton and it is used by
-    MpdPlaylist.    
-    """ 
+    MpdPlaylist.
+    """
     _instance = None
     playlistHistory=[]
-        
+
     def __new__(cls, *args, **kwargs):
         if not cls._instance:
             cls._instance = super(PlaylistHistory, cls).__new__(
                 cls, *args, **kwargs)
         return cls._instance
-        
+
     def addPlaylist(self,version,playlist):
         """ Add playlist version if not exist in history """
         for (v,p) in self.playlistHistory:
@@ -274,7 +274,7 @@ class PlaylistHistory(object):
                 diff.append(plCur[i])
         except IndexError: pass
         return diff
-            
+
     def show(self):
         print "show playlistHistory"
         print "number of version: " + str(len(self.playlistHistory))
@@ -282,10 +282,10 @@ class PlaylistHistory(object):
             print i
             print "------"
         print "show playlistHistory end"
-        
+
 
 class MpdPlaylist(object):
-    """ MpdPlaylist is a list of song.  
+    """ MpdPlaylist is a list of song.
     Use it to create a mapping between your player and the fictive mpd
     server.
 
@@ -338,4 +338,4 @@ class MpdPlaylistDummy(MpdPlaylist):
     def handlePlaylist(self):
         logger.warning("Dummy implementation of handlePlaylist method")
         return []
-        
+

@@ -30,11 +30,11 @@ is provided to commands treated during this session.
 import SocketServer
 SocketServer.TCPServer.allow_reuse_address = True
 import time
-import re 
+import re
 import threading
 import sys
-#from pimp.core.playlist import * 
-#from pimp.core.player import * 
+#from pimp.core.playlist import *
+#from pimp.core.player import *
 #import pimp.core.db
 import logging
 
@@ -111,7 +111,7 @@ class Frontend(object):
     @classmethod
     def GetDefaultUsername(cls):
         return cls._DefaultUsername
-        
+
 
 class MpdRequestHandler(SocketServer.StreamRequestHandler):
     """ Manage the connection from a mpd client. Each client
@@ -164,7 +164,7 @@ class MpdRequestHandler(SocketServer.StreamRequestHandler):
                          'replay_gain_status'           :{'class':None,'users':['default'],'group':'read','mpdVersion':"0.12",'neededBy':None},
                          'idle'             :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None}
                          }
-    
+
     def __init__(self, request, client_address, server):
         self.playlist=self.Playlist()
         self.frontend=Frontend()
@@ -266,7 +266,7 @@ class MpdRequestHandler(SocketServer.StreamRequestHandler):
     def SupportedCommand(cls):
         """Return a list of command and allowed users."""
         return ["%s\t\t%s"%(k,v['users']) for (k,v) in cls.__SupportedCommands.iteritems() if v['class']!=None ]
-    
+
 
     def __getCommandClass(self,commandName,frontend):
         """ To get a command class to execute on received command
@@ -294,8 +294,8 @@ class MpdRequestHandler(SocketServer.StreamRequestHandler):
     def GetPlayer(cls):
         """To get player object associated to pympdserver."""
         return cls.__player
-        
-            
+
+
 
 class MpdServer(SocketServer.ThreadingMixIn,SocketServer.TCPServer):
     """ Create a MPD server. By default, a request is treated via
@@ -308,12 +308,12 @@ class MpdServer(SocketServer.ThreadingMixIn,SocketServer.TCPServer):
         self.host, self.port = "", port
         self.requestHandler=RequestHandlerClass
         SocketServer.TCPServer.__init__(self,(self.host,self.port),RequestHandlerClass)
-        
+
     def run(self):
         """Run MPD server in a blocking way."""
         logger.info("Mpd Server is listening on port " + str(self.port))
         self.serve_forever()
-        
+
 class MpdServerDaemon(MpdServer):
     """ Create a deamonized MPD server. See :class:`MpdServer` for
     more informations. When a MpdServerDaemon object is created, a
@@ -323,7 +323,7 @@ class MpdServerDaemon(MpdServer):
         self.thread = threading.Thread(target=self.run)
         self.thread.setDaemon(True)
         self.thread.start()
-        
+
     def quit(self):
         """Stop MPD server deamon."""
         logger.info("Quiiting Mpd Server")
@@ -337,4 +337,4 @@ class MpdServerDaemon(MpdServer):
         else:
             self.thread.join(timeout)
         return self.thread.isAlive()
-        
+
