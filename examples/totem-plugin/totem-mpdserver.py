@@ -1,3 +1,4 @@
+from __future__ import print_function
 from gi.repository import Peas
 from gi.repository import Gtk
 from gi.repository import Totem
@@ -8,7 +9,7 @@ import mpdserver
 
 class Pause(mpdserver.Pause):
 	def handle_pause(self):
-		print "Pause catched"
+		print("Pause catched")
 		self.player.action_play_pause()
 
 class MpdServerPlugin(GObject.Object, Peas.Activatable):

@@ -1,14 +1,15 @@
 #!/usr/bin/python
 """ This is a simple howto example."""
+from __future__ import print_function
 import mpdserver
 
 # Define a playid command based on mpdserver.PlayId squeleton
 class PlayId(mpdserver.PlayId):
     # This method is called when playid command is sent by a client
-    def handle_args(self,songId):print "*** Play a file with Id '%d' ***" %songId
+    def handle_args(self,songId):print("*** Play a file with Id '%d' ***" %songId)
 class Play(mpdserver.Command):
     def handle_args(self):
-        print "*** Set player to play state ***"
+        print("*** Set player to play state ***")
 
 # Define a MpdPlaylist based on mpdserver.MpdPlaylist
 # This class permits to generate adapted mpd respond on playlist command.
@@ -36,17 +37,17 @@ mpd.requestHandler.RegisterCommand(Play)
 mpd.requestHandler.Playlist=MpdPlaylist
 #mpd.requestHandler.Playlist=mpdserver.MpdPlaylistDummy
 
-print """Starting a mpd server on port 9999
+print("""Starting a mpd server on port 9999
 Type Ctrl+C to exit
 
 To try it, type in another console
 $ mpc -p 9999 play
 Or launch a MPD client with port 9999
-"""
+""")
 if __name__ == "__main__":
     try:
         while mpd.wait(1) : pass
     except KeyboardInterrupt:
-        print "Stopping MPD server"
+        print("Stopping MPD server")
         mpd.quit()
 

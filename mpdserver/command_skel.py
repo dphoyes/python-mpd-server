@@ -1,4 +1,5 @@
-from command_base import *
+from __future__ import absolute_import
+from .command_base import *
 
 ################################
 # Default Commands Definitions #

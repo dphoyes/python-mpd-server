@@ -27,8 +27,10 @@ gmpc. Then, we have to implement a lot of commands with dummy
 respond. However, gmpc use 'command' command to allow user to play,
 pause ...
 """
+from __future__ import print_function
+from __future__ import absolute_import
 import logging
-import mpdserver
+from . import mpdserver
 logger=mpdserver.logging
 #logger.basicConfig(level=logging.DEBUG)
 
@@ -223,10 +225,10 @@ class MpdLibrarySong(object):
 
 import types
 class Opt(object):pass
-class OptInt(Opt,types.IntType):
+class OptInt(Opt,int):
     """ Represent optionnal integer command argument"""
     pass
-class OptStr(Opt,types.StringType):
+class OptStr(Opt,str):
     """ Represent optionnal string command argument"""
     pass
 
@@ -276,12 +278,12 @@ class PlaylistHistory(object):
         return diff
 
     def show(self):
-        print "show playlistHistory"
-        print "number of version: " + str(len(self.playlistHistory))
+        print("show playlistHistory")
+        print("number of version: " + str(len(self.playlistHistory)))
         for i in self.playlistHistory:
-            print i
-            print "------"
-        print "show playlistHistory end"
+            print(i)
+            print("------")
+        print("show playlistHistory end")
 
 
 class MpdPlaylist(object):

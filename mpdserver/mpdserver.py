@@ -27,6 +27,7 @@ A client connection can begin by a password command. In this case, a
 :class:`Frontend` is created by client password command. This object
 is provided to commands treated during this session.
 """
+from __future__ import absolute_import
 import SocketServer
 SocketServer.TCPServer.allow_reuse_address = True
 import time
@@ -38,8 +39,8 @@ import sys
 #import pimp.core.db
 import logging
 
-from command_base import *
-from command_skel import *
+from .command_base import *
+from .command_skel import *
 
 logger=logging
 #logger.basicConfig(level=logging.INFO)
@@ -211,7 +212,7 @@ class MpdRequestHandler(SocketServer.StreamRequestHandler):
                 logger.debug("Message sent:\n\t\t"+msg.replace("\n","\n\t\t"))
                 if respond == True:
                     self.request.send(msg)
-            except IOError,e:
+            except IOError as e:
                 logger.debug("Client disconnected (%s)"% threading.currentThread().getName())
                 break
 
@@ -271,7 +272,7 @@ class MpdRequestHandler(SocketServer.StreamRequestHandler):
     def __getCommandClass(self,commandName,frontend):
         """ To get a command class to execute on received command
         string. This method raise supported command errors."""
-        if not self.__SupportedCommands.has_key(commandName):
+        if commandName not in self.__SupportedCommands:
             logger.warning("Command '%s' is not a MPD command!" % commandName)
             raise CommandNotMPDCommand(commandName)
         elif self.__SupportedCommands[commandName]['class'] == None:
