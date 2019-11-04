@@ -184,7 +184,7 @@ class MpdRequestHandler(socketserver.StreamRequestHandler):
                 cmdlist=None
                 cmds=[]
                 while True:
-                    self.data = self.rfile.readline().strip()
+                    self.data = self.rfile.readline().decode('utf-8').strip()
                     if len(self.data)==0 : raise IOError #To detect last EOF
                     if self.data == "command_list_ok_begin":
                         cmdlist="list_ok"
@@ -211,7 +211,7 @@ class MpdRequestHandler(socketserver.StreamRequestHandler):
                     msg=msg+"OK\n"
                 logger.debug("Message sent:\n\t\t"+msg.replace("\n","\n\t\t"))
                 if respond == True:
-                    self.request.send(msg)
+                    self.request.send(msg.encode('utf-8'))
             except IOError as e:
                 logger.debug("Client disconnected (%s)"% threading.currentThread().getName())
                 break
@@ -220,7 +220,7 @@ class MpdRequestHandler(socketserver.StreamRequestHandler):
         """ Execute mpd client command. Take a string, parse it and
         execute the corresponding server.Command function."""
         try:
-            pcmd=[m.group() for m in re.compile('(\w+)|("([^"])+")').finditer(c)] # WARNING An argument cannot contains a '"'
+            pcmd=[m.group() for m in re.compile(r'(\w+)|("([^"])+")').finditer(c)] # WARNING An argument cannot contains a '"'
             cmd=pcmd[0]
             for i in range(1, len(pcmd)):
                 pcmd[i] = pcmd[i].replace('"', '')
