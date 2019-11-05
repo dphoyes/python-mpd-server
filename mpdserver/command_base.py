@@ -38,7 +38,7 @@ logger=mpdserver.logging
 class CommandArgumentException(Exception):pass
 
 
-class Command():
+class Command(object):
     """ Command class is the base command class. You can define
     argument format by setting :attr:`formatArg`. Command argument
     can be accessed with :attr:`args` dictionnary.

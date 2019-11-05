@@ -28,8 +28,8 @@ A client connection can begin by a password command. In this case, a
 is provided to commands treated during this session.
 """
 from __future__ import absolute_import
-import SocketServer
-SocketServer.TCPServer.allow_reuse_address = True
+import socketserver
+socketserver.TCPServer.allow_reuse_address = True
 import time
 import re
 import threading
@@ -114,7 +114,7 @@ class Frontend(object):
         return cls._DefaultUsername
 
 
-class MpdRequestHandler(SocketServer.StreamRequestHandler):
+class MpdRequestHandler(socketserver.StreamRequestHandler):
     """ Manage the connection from a mpd client. Each client
     connection instances this object."""
     Playlist=MpdPlaylist
@@ -170,7 +170,7 @@ class MpdRequestHandler(SocketServer.StreamRequestHandler):
         self.playlist=self.Playlist()
         self.frontend=Frontend()
         logger.debug( "Client connected (%s)" % threading.currentThread().getName())
-        SocketServer.StreamRequestHandler.__init__(self,request,client_address,server)
+        socketserver.StreamRequestHandler.__init__(self,request,client_address,server)
 
 
     """ Handle connection with mpd client. It gets client command,
@@ -256,7 +256,7 @@ class MpdRequestHandler(SocketServer.StreamRequestHandler):
         if commandName != None:
              cls.__SupportedCommands[commandNames]['users'].append(user)
         elif group != None:
-            for c in cls.__SupportedCommands.itervalues():
+            for c in cls.__SupportedCommands.values():
                 if c['group']==group:
                     c['users'].append(user)
         else:
@@ -266,7 +266,7 @@ class MpdRequestHandler(SocketServer.StreamRequestHandler):
     @classmethod
     def SupportedCommand(cls):
         """Return a list of command and allowed users."""
-        return ["%s\t\t%s"%(k,v['users']) for (k,v) in cls.__SupportedCommands.iteritems() if v['class']!=None ]
+        return ["%s\t\t%s"%(k,v['users']) for (k,v) in cls.__SupportedCommands.items() if v['class']!=None ]
 
 
     def __getCommandClass(self,commandName,frontend):
@@ -298,7 +298,7 @@ class MpdRequestHandler(SocketServer.StreamRequestHandler):
 
 
 
-class MpdServer(SocketServer.ThreadingMixIn,SocketServer.TCPServer):
+class MpdServer(socketserver.ThreadingMixIn,socketserver.TCPServer):
     """ Create a MPD server. By default, a request is treated via
     :class:`MpdRequestHandler` class but you can specify an alternative
     request class with RequestHandlerClass argument."""
@@ -308,7 +308,7 @@ class MpdServer(SocketServer.ThreadingMixIn,SocketServer.TCPServer):
     def __init__(self,port=6600,RequestHandlerClass=MpdRequestHandler):
         self.host, self.port = "", port
         self.requestHandler=RequestHandlerClass
-        SocketServer.TCPServer.__init__(self,(self.host,self.port),RequestHandlerClass)
+        socketserver.TCPServer.__init__(self,(self.host,self.port),RequestHandlerClass)
 
     def run(self):
         """Run MPD server in a blocking way."""
