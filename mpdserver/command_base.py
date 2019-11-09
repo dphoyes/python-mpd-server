@@ -29,6 +29,7 @@ pause ...
 """
 from __future__ import print_function
 from __future__ import absolute_import
+import inspect
 import logging
 from . import mpdserver
 logger=mpdserver.logging
@@ -37,6 +38,11 @@ logger=mpdserver.logging
 
 class CommandArgumentException(Exception):pass
 
+async def _await_if_awaitable(x):
+    if inspect.iscoroutine(x):
+        return await x
+    else:
+        return x
 
 class Command(object):
     """ Command class is the base command class. You can define
@@ -72,18 +78,27 @@ class Command(object):
     """ A dictionnary of received arguments from mpd client. They must
     be defined in :attr:`formatArg`."""
 
-    def __init__(self,args,playlist,frontend,player,request):
-            self.args=self.__parseArg(args)
-            self.playlist=playlist
-            self.frontend=frontend
-            self.player=player
-            self.request=request
+    def __init__(self, args, client):
+        self.args = self.__parseArg(args)
+        self.client = client
 
-    def run(self):
+    @property
+    def frontend(self):
+        return self.client.frontend
+
+    @property
+    def server(self):
+        return self.client.server
+
+    @property
+    def playlist(self):
+        return self.server.playlist
+
+    async def run(self):
         """To treat a command. This class handle_args method and toMpdMsg method."""
         try:
-            self.handle_args(**(self.args))
-            return self.toMpdMsg()
+            await _await_if_awaitable(self.handle_args(**(self.args)))
+            return await _await_if_awaitable(self.toMpdMsg())
         except NotImplementedError as e:
             raise mpdserver.CommandNotImplemented(self.__class__,str(e))
 
@@ -144,12 +159,9 @@ class CommandItems(Command):
         """ Overwrite this method to send items to mpd client. This method
         must return a list a tuples ("key",value)."""
         return []
-    def toMpdMsg(self):
-        items=self.items()
-        acc=""
-        for (i,v) in items:
-            acc+="%s: %s\n"%(i,str(v))
-        return acc
+    async def toMpdMsg(self):
+        items = await _await_if_awaitable(self.items())
+        return ''.join("{}: {}\n".format(i,v) for i,v in items)
 
 class CommandSongs(Command):
     """ This is a subclass of :class:`Command` class. Respond songs
