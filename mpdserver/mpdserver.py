@@ -185,6 +185,10 @@ class MpdClientHandlerBase(object):
                 raise TypeError
         cls.define_command_user_permissions(UserPermissionsCommand)
 
+        for u in cls.define_super_users():
+            for cmd in cls.__SupportedCommands.values():
+                cmd['users'].append(u)
+
     def _getCommandClass(self,commandName,frontend):
         """ To get a command class to execute on received command
         string. This method raise supported command errors."""
@@ -209,6 +213,10 @@ class MpdClientHandlerBase(object):
     @classmethod
     def define_command_user_permissions(cls, register):
         pass
+
+    @classmethod
+    def define_super_users(cls):
+        return ["default"]
 
     @classmethod
     def SupportedCommand(cls):
