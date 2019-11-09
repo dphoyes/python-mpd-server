@@ -114,6 +114,66 @@ class Frontend(object):
         return cls._DefaultUsername
 
 
+class IdleState(object):
+    SUBSYSTEM_NAMES = (
+        "database",
+        "update",
+        "stored_playlist",
+        "playlist",
+        "player",
+        "mixer",
+        "output",
+        "options",
+        "partition",
+        "sticker",
+        "subscription",
+        "message",
+    )
+
+    def __init__(self):
+        loop = asyncio.get_running_loop()
+        self.futures = {s: loop.create_future() for s in self.SUBSYSTEM_NAMES}
+
+    def notify(self, subsystem):
+        future = self.futures[subsystem]
+        if not future.done():
+            future.set_result(subsystem)
+
+    async def wait(self, subsystems=()):
+        if subsystems:
+            futures = []
+            for s in subsystems:
+                try:
+                    futures.append(self.futures[s])
+                except KeyError:
+                    raise MpdCommandError(command="idle", msg="Invalid subsystem '{}'".format(s))
+        else:
+            futures = self.futures.values()
+        done, pending = await asyncio.wait(futures, return_when=asyncio.FIRST_COMPLETED)
+        changed_subsystems = [f.result() for f in done]
+        loop = asyncio.get_running_loop()
+        for s in changed_subsystems:
+            self.futures[s] = loop.create_future()
+        return changed_subsystems
+
+    async def wait_or_noidle(self, subsystems, client_reader):
+        wait_for_event = asyncio.create_task(self.wait(subsystems))
+        wait_for_command = asyncio.create_task(client_reader.readline(timeout=None))
+        done, pending = await asyncio.wait({wait_for_event, wait_for_command}, return_when=asyncio.FIRST_COMPLETED)
+        if wait_for_command.done():
+            command = wait_for_command.result()
+            if command != "noidle":
+                raise MpdCommandError(command=command, msg="The only valid command in idle state is noidle")
+            logger.debug("Received noidle")
+        else:
+            wait_for_command.cancel()
+        if wait_for_event.done():
+            return wait_for_event.result()
+        else:
+            wait_for_event.cancel()
+            return []
+
+
 class QueuedStreamReader(object):
     def __init__(self, reader):
         self.reader = reader
@@ -179,7 +239,8 @@ class MpdClientHandlerBase(object):
             'urlhandlers'           :{'class':None,'users':['default'],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'listallinfo'           :{'class':None,'users':['default'],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'replay_gain_status'           :{'class':None,'users':['default'],'group':'read','mpdVersion':"0.12",'neededBy':None},
-            'idle'             :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None}
+            'idle'             :{'class':Idle,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
+            'noidle'           :{'class':NoIdle,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
         }
 
         def RegisterCommand(cls_cmd, users=['default']):
@@ -251,6 +312,7 @@ class MpdClientHandler(MpdClientHandlerBase):
         self.writer = writer
         self.server = server
         self.frontend = Frontend()
+        self.idle = IdleState()
         logger.debug( "Client connected (%s)" % threading.currentThread().getName())
 
     async def run(self):
@@ -281,7 +343,8 @@ class MpdClientHandler(MpdClientHandlerBase):
                 try:
                     for c in cmds:
                         logger.debug("Command '" + c + "'...")
-                        (respond, rspmsg) = await self.__cmdExec(c)
+                        respond_to_this, rspmsg = await self.__cmdExec(c)
+                        respond = respond or respond_to_this
                         msg += rspmsg
                         if cmdlist=="list_ok" :  msg=msg+"list_OK\n"
                 except MpdCommandError as e:
@@ -332,6 +395,7 @@ class MpdServer(object):
     def __init__(self, port=6600, ClientHandler=MpdClientHandler, Playlist=MpdPlaylist):
         self.host, self.port = "", port
         self.ClientHandler = ClientHandler
+        self.clients = set()
         self.playlist = Playlist()
 
     async def run(self):
@@ -340,11 +404,17 @@ class MpdServer(object):
 
         async def handle_client(reader, writer):
             handler = self.ClientHandler(reader, writer, self)
+            self.clients.add(handler)
             try:
                 await handler.run()
             finally:
                 writer.close()
                 await writer.wait_closed()
+                self.clients.remove(handler)
 
         async with await asyncio.start_server(handle_client, '', self.port) as srv:
             await srv.serve_forever()
+
+    def notify_idle(self, subsystem):
+        for c in self.clients:
+            c.idle.notify(subsystem)

@@ -94,6 +94,9 @@ class Command(object):
     def playlist(self):
         return self.server.playlist
 
+    def notify_idle(self, subsystem):
+        return self.server.notify_idle(subsystem)
+
     async def run(self):
         """To treat a command. This class handle_args method and toMpdMsg method."""
         try:

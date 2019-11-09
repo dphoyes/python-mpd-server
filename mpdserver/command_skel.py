@@ -31,6 +31,16 @@ class Seek(Command):
     """Skip to a specified point toSec in a song songPosition on the playlist"""
     formatArg=[('songPosition',int),('toSec',int)]
 
+class Idle(CommandItems):
+    listArg = True
+    async def handle_args(self, args):
+        self.changed_subsystems = await self.client.idle.wait_or_noidle(subsystems=args, client_reader=self.client.reader)
+    def items(self):
+        return [("changed", s) for s in self.changed_subsystems]
+
+class NoIdle(Command):
+    respond=False
+
 class Outputs(CommandItems):
     def items(self):
         return [('outputid',0),        # <int output> the output number

@@ -23,6 +23,7 @@ class Client(mpdserver.MpdClientHandler):
         class Play(mpdserver.Command):
             def handle_args(self):
                 print("*** Set player to play state ***")
+                self.notify_idle("player")
 
 
 # Set the user defined playlist class
