@@ -114,6 +114,23 @@ class Frontend(object):
         return cls._DefaultUsername
 
 
+class QueuedStreamReader(object):
+    def __init__(self, reader):
+        self.reader = reader
+        self.lines = asyncio.Queue()
+        self.task = asyncio.create_task(self.__run())
+
+    def __del__(self):
+        self.task.cancel()
+
+    async def __run(self):
+        async for line in self.reader:
+            await self.lines.put(line.decode('utf-8').strip())
+
+    async def readline(self, timeout):
+        return await asyncio.wait_for(self.lines.get(), timeout=timeout)
+
+
 class MpdClientHandlerBase(object):
     def __init_subclass__(cls):
         super().__init_subclass__()
@@ -230,7 +247,7 @@ class MpdClientHandler(MpdClientHandlerBase):
 
     def __init__(self, reader, writer, server):
         super().__init__()
-        self.reader = reader
+        self.reader = QueuedStreamReader(reader)
         self.writer = writer
         self.server = server
         self.frontend = Frontend()
@@ -248,7 +265,7 @@ class MpdClientHandler(MpdClientHandlerBase):
                 cmdlist=None
                 cmds=[]
                 while True:
-                    self.data = (await self.reader.readline()).decode('utf-8').strip()
+                    self.data = await self.reader.readline(timeout=10)
                     if len(self.data)==0 : raise IOError #To detect last EOF
                     if self.data == "command_list_ok_begin":
                         cmdlist="list_ok"
@@ -270,14 +287,18 @@ class MpdClientHandler(MpdClientHandlerBase):
                 except MpdCommandError as e:
                     logger.info("Command Error: %s"%e.toMpdMsg())
                     msg=e.toMpdMsg()
+                    respond = True
                 else:
                     msg=msg+"OK\n"
-                logger.debug("Message sent:\n\t\t"+msg.replace("\n","\n\t\t"))
-                if respond == True:
+                if respond is True:
+                    logger.debug("Message sent:\n\t\t"+msg.replace("\n","\n\t\t"))
                     self.writer.write(msg.encode('utf-8'))
                     await self.writer.drain()
             except IOError as e:
                 logger.debug("Client disconnected (%s)"% threading.currentThread().getName())
+                break
+            except asyncio.TimeoutError as e:
+                logger.debug("Client connection timed out")
                 break
 
     async def __cmdExec(self,c):
@@ -319,7 +340,11 @@ class MpdServer(object):
 
         async def handle_client(reader, writer):
             handler = self.ClientHandler(reader, writer, self)
-            return await handler.run()
+            try:
+                await handler.run()
+            finally:
+                writer.close()
+                await writer.wait_closed()
 
         async with await asyncio.start_server(handle_client, '', self.port) as srv:
             await srv.serve_forever()
