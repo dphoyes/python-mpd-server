@@ -29,23 +29,20 @@ is provided to commands treated during this session.
 """
 from __future__ import absolute_import
 
-import asyncio
-import time
-import re
+import anyio
 import threading
 import sys
 #from pimp.core.playlist import *
 #from pimp.core.player import *
 #import pimp.core.db
-import logging
 
 from .command_base import *
 from .command_skel import *
 from .errors import *
+from .utils import WithAsyncExitStack, WithDaemonTasks
+from .logging import Logger
 
-logger=logging
-#logger.basicConfig(level=logging.INFO)
-logger.basicConfig(level=logging.DEBUG)
+logger = Logger(__name__)
 
 
 class Frontend(object):
@@ -93,64 +90,73 @@ class IdleState(object):
     )
 
     def __init__(self):
-        loop = asyncio.get_running_loop()
-        self.futures = {s: loop.create_future() for s in self.SUBSYSTEM_NAMES}
+        self.events = {s: anyio.create_event() for s in self.SUBSYSTEM_NAMES}
 
-    def notify(self, subsystem):
-        future = self.futures[subsystem]
-        if not future.done():
-            future.set_result(subsystem)
+    async def notify(self, subsystem):
+        logger.debug("Idle notify: {}", subsystem)
+        await self.events[subsystem].set()
 
     async def wait(self, subsystems=()):
         if subsystems:
-            futures = []
-            for s in subsystems:
-                try:
-                    futures.append(self.futures[s])
-                except KeyError:
-                    raise MpdCommandError(command="idle", msg="Invalid subsystem '{}'".format(s))
+            try:
+                events_to_watch = [self.events[s] for s in subsystems]
+            except KeyError as e:
+                raise MpdCommandError(command="idle", msg="Invalid subsystem '{}'".format(e.args[0]))
         else:
-            futures = self.futures.values()
-        done, pending = await asyncio.wait(futures, return_when=asyncio.FIRST_COMPLETED)
-        changed_subsystems = [f.result() for f in done]
-        loop = asyncio.get_running_loop()
-        for s in changed_subsystems:
-            self.futures[s] = loop.create_future()
+            events_to_watch = self.events.values()
+
+        logger.debug("Going into idle ({})", subsystems)
+        async with anyio.create_task_group() as tg:
+            async def wait_for(e):
+                await e.wait()
+                await tg.cancel_scope.cancel()
+            for e in events_to_watch:
+                await tg.spawn(wait_for, e)
+        logger.debug("Coming out of idle")
+
+        changed_subsystems = []
+        for name, event in self.events.items():
+            if event.is_set():
+                changed_subsystems.append(name)
+                event.clear()
+        logger.debug("Changed subsystems: {}", changed_subsystems)
         return changed_subsystems
 
     async def wait_or_noidle(self, subsystems, client_reader):
-        wait_for_event = asyncio.create_task(self.wait(subsystems))
-        wait_for_command = asyncio.create_task(client_reader.readline(timeout=None))
-        done, pending = await asyncio.wait({wait_for_event, wait_for_command}, return_when=asyncio.FIRST_COMPLETED)
-        if wait_for_command.done():
-            command = wait_for_command.result()
-            if command != "noidle":
-                raise MpdCommandError(command=command, msg="The only valid command in idle state is noidle")
-            logger.debug("Received noidle")
-        else:
-            wait_for_command.cancel()
-        if wait_for_event.done():
-            return wait_for_event.result()
-        else:
-            wait_for_event.cancel()
-            return []
+        changed_subsystems = []
+
+        async with anyio.create_task_group() as tg:
+            async def wait_for_change():
+                changed_subsystems[:] = await self.wait(subsystems)
+                await tg.cancel_scope.cancel()
+            await tg.spawn(wait_for_change)
+
+            async def wait_for_noidle():
+                line = await client_reader.readline()
+                if line.split(maxsplit=1)[0] != b"noidle":
+                    raise MpdCommandError(command=line, msg="The only valid command in idle state is noidle")
+                logger.debug("Received noidle")
+                await tg.cancel_scope.cancel()
+            await tg.spawn(wait_for_noidle)
+
+        return changed_subsystems
 
 
-class QueuedStreamReader(object):
-    def __init__(self, reader):
-        self.reader = reader
-        self.lines = asyncio.Queue()
-        self.task = asyncio.create_task(self.__run())
+class CommandReader(WithDaemonTasks):
+    def __init__(self, stream):
+        super().__init__()
+        self.stream = stream
+        self.lines = anyio.create_queue(1)
 
-    def __del__(self):
-        self.task.cancel()
+    async def _spawn_daemon_tasks(self, tasks):
+        await tasks.spawn(self.__run)
 
     async def __run(self):
-        async for line in self.reader:
-            await self.lines.put(line.decode('utf-8').strip())
+        async for line in self.stream.receive_delimited_chunks(b'\n', 1024):
+            await self.lines.put(line)
 
-    async def readline(self, timeout):
-        return await asyncio.wait_for(self.lines.get(), timeout=timeout)
+    async def readline(self):
+        return await self.lines.get()
 
 
 class MpdClientHandlerBase(object):
@@ -264,88 +270,83 @@ class MpdClientHandlerBase(object):
         return ["%s\t\t%s"%(k,v['users']) for (k,v) in cls.__SupportedCommands.items() if v['class']!=None ]
 
 
-class MpdClientHandler(MpdClientHandlerBase):
+class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
     """ Manage the connection from a mpd client. Each client
     connection instances this object."""
 
-    def __init__(self, reader, writer, server):
+    def __init__(self, stream, server):
         super().__init__()
-        self.reader = QueuedStreamReader(reader)
-        self.writer = writer
+        self.reader = CommandReader(stream)
+        self.stream = stream
         self.server = server
         self.frontend = Frontend()
         self.idle = IdleState()
         logger.debug( "Client connected (%s)" % threading.currentThread().getName())
 
+    async def _init_exit_stack(self, stack):
+        await stack.enter_async_context(self.reader)
+
     async def run(self):
         """Handle connection with mpd client. It gets client command,
         execute it and send a respond."""
-        self.writer.write("OK MPD 0.13.0\n".encode('utf-8'))
-        await self.writer.drain()
+        await self.stream.send_all("OK MPD 0.13.0\n".encode('utf-8'))
 
         while True:
-            msg=""
-            try:
                 cmdlist=None
                 cmds=[]
                 while True:
-                    self.data = await self.reader.readline(timeout=10)
-                    if len(self.data)==0 : raise IOError #To detect last EOF
-                    if self.data == "command_list_ok_begin":
+                    try:
+                        async with anyio.fail_after(10):
+                            raw_line = await self.reader.readline()
+                    except TimeoutError:
+                        logger.debug("Client connection timed out")
+                        return
+                    cmd = raw_line.split(maxsplit=1)[0].decode('utf-8')
+                    if cmd == "command_list_ok_begin":
                         cmdlist="list_ok"
-                    elif self.data == "command_list_begin":
+                    elif cmd == "command_list_begin":
                         cmdlist="list"
-                    elif self.data == "command_list_end":
+                    elif cmd == "command_list_end":
                         break
                     else:
-                        cmds.append(self.data)
+                        cmds.append((cmd, raw_line))
                         if not cmdlist:break
-                logger.debug(f"Commands received from {self.writer.get_extra_info('peername')[0]}")
+                logger.debug("Commands received.")
                 respond = False
                 try:
-                    for c in cmds:
-                        logger.debug("Command '" + c + "'...")
-                        respond_to_this, rspmsg = await self.__cmdExec(c)
+                    for c, raw_command in cmds:
+                        logger.debug("Command '{}'...", raw_command)
+                        respond_to_this, rspmsg = self.__cmdExec(c, raw_command)
                         respond = respond or respond_to_this
-                        msg += rspmsg
-                        if cmdlist=="list_ok" :  msg=msg+"list_OK\n"
+                        if inspect.isawaitable(rspmsg):
+                            rspmsg = await rspmsg
+                        async for response in rspmsg:
+                            logger.debug("Response: {}", response)
+                            await self.stream.send_all(response)
+                        if cmdlist=="list_ok":
+                            await self.stream.send_all(b"list_OK\n")
                 except MpdCommandError as e:
                     logger.info("Command Error: %s"%e.toMpdMsg())
-                    msg=e.toMpdMsg()
-                    respond = True
+                    await self.stream.send_all(e.toMpdMsg().encode('utf-8'))
                 else:
-                    msg=msg+"OK\n"
-                if respond is True:
-                    logger.debug("Message sent:\n\t\t"+msg.replace("\n","\n\t\t"))
-                    self.writer.write(msg.encode('utf-8'))
-                    await self.writer.drain()
-            except IOError as e:
-                logger.debug("Client disconnected (%s)"% threading.currentThread().getName())
-                break
-            except asyncio.TimeoutError as e:
-                logger.debug("Client connection timed out")
-                break
+                    if respond:
+                        logger.debug("Response: OK\n")
+                        await self.stream.send_all(b"OK\n")
 
-    async def __cmdExec(self,c):
+    def __cmdExec(self, cmd, raw_command):
         """ Execute mpd client command. Take a string, parse it and
         execute the corresponding server.Command function."""
         try:
-            pcmd = [m.group() for m in re.compile(r'(\w+)|("([^"])+")').finditer(c)] # WARNING An argument cannot contains a '"'
-            cmd = pcmd[0]
-            for i in range(1, len(pcmd)):
-                pcmd[i] = pcmd[i].replace('"', '')
-            args = pcmd[1:]
-            logger.debug("Command executed : %s %s for frontend '%s'" % (cmd,args,self.frontend.get()))
+            logger.debug("Command executed : {} for frontend '{}'", raw_command, self.frontend.get())
             commandCls = self._getCommandClass(cmd,self.frontend)
-            msg = await commandCls(args, client=self).run()
+            msg = commandCls(raw_command, client=self).run()
         except MpdCommandError:
             raise
         except CommandNotSupported:
             raise
         except :
-            logger.critical("Unexpected error on command %s (%s): %s" % (c,self.frontend.get(),sys.exc_info()[0]))
+            logger.critical("Unexpected error on command %s (%s): %s" % (raw_command,self.frontend.get(),sys.exc_info()[0]))
             raise
-        logger.debug("Respond:\n\t\t"+msg.replace("\n","\n\t\t"))
         return (commandCls.respond, msg)
 
 
@@ -364,19 +365,21 @@ class MpdServer(object):
         """Run MPD server in a coroutine"""
         logger.info("Mpd Server is listening on port " + str(self.port))
 
-        async def handle_client(reader, writer):
-            handler = self.ClientHandler(reader, writer, self)
-            self.clients.add(handler)
-            try:
-                await handler.run()
-            finally:
-                writer.close()
-                await writer.wait_closed()
-                self.clients.remove(handler)
+        async def handle_client(client):
+            async with client:
+                async with self.ClientHandler(client, self) as handler:
+                    self.clients.add(handler)
+                    try:
+                        await handler.run()
+                    finally:
+                        self.clients.remove(handler)
+                        logger.debug("Client connection closed")
 
-        async with await asyncio.start_server(handle_client, '', self.port) as srv:
-            await srv.serve_forever()
+        async with anyio.create_task_group() as tasks:
+            async with await anyio.create_tcp_server(self.port) as srv:
+                async for client in srv.accept_connections():
+                    await tasks.spawn(handle_client, client)
 
-    def notify_idle(self, subsystem):
+    async def notify_idle(self, subsystem):
         for c in self.clients:
-            c.idle.notify(subsystem)
+            await c.idle.notify(subsystem)

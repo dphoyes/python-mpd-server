@@ -30,10 +30,11 @@ pause ...
 from __future__ import print_function
 from __future__ import absolute_import
 import inspect
-import logging
-from . import mpdserver
-logger=mpdserver.logging
-#logger.basicConfig(level=logging.DEBUG)
+import re
+from . import errors
+from .logging import Logger
+
+logger = Logger(__name__)
 
 
 class CommandArgumentException(Exception):pass
@@ -44,7 +45,41 @@ async def _await_if_awaitable(x):
     else:
         return x
 
-class Command(object):
+
+class CommandBase(object):
+    respond = True
+
+    def __init__(self, command, client):
+        self.raw_command = command
+        self.client = client
+
+    @classmethod
+    def GetCommandName(cls):
+        """ MPD command name. Command name is the lower class
+        name. This string is used to parse a client request. You can
+        override this classmethod to define particular commandname."""
+        return cls.__name__.lower()
+
+    @property
+    def frontend(self):
+        return self.client.frontend
+
+    @property
+    def server(self):
+        return self.client.server
+
+    @property
+    def playlist(self):
+        return self.server.playlist
+
+    def notify_idle(self, subsystem):
+        return self.server.notify_idle(subsystem)
+
+    async def run(self):
+        raise NotImplementedError
+
+
+class Command(CommandBase):
     """ Command class is the base command class. You can define
     argument format by setting :attr:`formatArg`. Command argument
     can be accessed with :attr:`args` dictionnary.
@@ -67,7 +102,6 @@ class Command(object):
     formatArg=[]
     varArg=False
     listArg=False
-    respond=True
     """ To specify command arguments format. For example, ::
 
        formatArg=[("song",OptStr)]
@@ -78,39 +112,19 @@ class Command(object):
     """ A dictionnary of received arguments from mpd client. They must
     be defined in :attr:`formatArg`."""
 
-    def __init__(self, args, client):
+    def __init__(self, command, client):
+        super().__init__(command, client)
+        args = [m.group().replace('"', '') for m in re.compile(r'(\w+)|("([^"])+")').finditer(command.decode('utf-8'))][1:] # WARNING An argument cannot contains a '"'
         self.args = self.__parseArg(args)
-        self.client = client
-
-    @property
-    def frontend(self):
-        return self.client.frontend
-
-    @property
-    def server(self):
-        return self.client.server
-
-    @property
-    def playlist(self):
-        return self.server.playlist
-
-    def notify_idle(self, subsystem):
-        return self.server.notify_idle(subsystem)
 
     async def run(self):
         """To treat a command. This class handle_args method and toMpdMsg method."""
         try:
             await _await_if_awaitable(self.handle_args(**(self.args)))
-            return await _await_if_awaitable(self.toMpdMsg())
+            result = await _await_if_awaitable(self.toMpdMsg())
+            yield result.encode('utf-8')
         except NotImplementedError as e:
-            raise mpdserver.CommandNotImplemented(self.__class__,str(e))
-
-    @classmethod
-    def GetCommandName(cls):
-        """ MPD command name. Command name is the lower class
-        name. This string is used to parse a client request. You can
-        override this classmethod to define particular commandname."""
-        return cls.__name__.lower()
+            raise errors.CommandNotImplemented(self.__class__,str(e))
 
     def __parseArg(self,args):
         if self.listArg == True:

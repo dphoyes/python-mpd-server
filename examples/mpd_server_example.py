@@ -1,8 +1,7 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 """ This is a simple howto example."""
-from __future__ import print_function
 
-import asyncio
+import anyio
 import mpdserver
 
 
@@ -17,13 +16,14 @@ class Client(mpdserver.MpdClientHandler):
         @register
         class PlayId(mpdserver.PlayId):
             # This method is called when playid command is sent by a client
-            def handle_args(self,songId):print("*** Play a file with Id '%d' ***" %songId)
+            def handle_args(self,songId):
+                print("*** Play a file with Id '%d' ***" %songId)
 
         @register
         class Play(mpdserver.Command):
-            def handle_args(self):
+            async def handle_args(self):
                 print("*** Set player to play state ***")
-                self.notify_idle("player")
+                await self.notify_idle("player")
 
 
 # Set the user defined playlist class
@@ -58,7 +58,7 @@ def main():
     """)
     # Create an mpd server that listen on port 9999
     mpd = Server(9999)
-    asyncio.run(mpd.run())
+    anyio.run(mpd.run, backend='asyncio')
 
 
 if __name__ == "__main__":

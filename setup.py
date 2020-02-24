@@ -1,14 +1,16 @@
 #!/usr/bin/env python
 
-from distutils.core import setup
+from setuptools import setup
 
 setup(name='python-mpd-server',
       version='0.1',
       description='Create MPD Server in Python',
-      author='kedals',
-      author_email='kedals0@gmail.com',
+      author='dphoyes',
       url='http://pympdserver.tuxfamily.org/',
       packages=["mpdserver"],
+      install_requires=[
+          'anyio',
+      ],
       license="GPLv3",
       classifiers=[
         'Development Status :: 4 - Beta',
