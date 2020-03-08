@@ -292,46 +292,46 @@ class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
         await self.stream.send_all("OK MPD 0.13.0\n".encode('utf-8'))
 
         while True:
-                cmdlist=None
-                cmds=[]
-                while True:
-                    try:
-                        async with anyio.fail_after(10):
-                            raw_line = await self.reader.readline()
-                    except TimeoutError:
-                        logger.debug("Client connection timed out")
-                        return
-                    cmd = raw_line.split(maxsplit=1)[0].decode('utf-8')
-                    if cmd == "command_list_ok_begin":
-                        cmdlist="list_ok"
-                    elif cmd == "command_list_begin":
-                        cmdlist="list"
-                    elif cmd == "command_list_end":
-                        break
-                    else:
-                        cmds.append((cmd, raw_line))
-                        if not cmdlist:break
-                logger.debug("Commands received.")
-                respond = False
+            cmdlist=None
+            cmds=[]
+            while True:
                 try:
-                    for c, raw_command in cmds:
-                        logger.debug("Command '{}'...", raw_command)
-                        respond_to_this, rspmsg = self.__cmdExec(c, raw_command)
-                        respond = respond or respond_to_this
-                        if inspect.isawaitable(rspmsg):
-                            rspmsg = await rspmsg
-                        async for response in rspmsg:
-                            logger.debug("Response: {}", response)
-                            await self.stream.send_all(response)
-                        if cmdlist=="list_ok":
-                            await self.stream.send_all(b"list_OK\n")
-                except MpdCommandError as e:
-                    logger.info("Command Error: %s"%e.toMpdMsg())
-                    await self.stream.send_all(e.toMpdMsg().encode('utf-8'))
+                    async with anyio.fail_after(10):
+                        raw_line = await self.reader.readline()
+                except TimeoutError:
+                    logger.debug("Client connection timed out")
+                    return
+                cmd = raw_line.split(maxsplit=1)[0].decode('utf-8')
+                if cmd == "command_list_ok_begin":
+                    cmdlist="list_ok"
+                elif cmd == "command_list_begin":
+                    cmdlist="list"
+                elif cmd == "command_list_end":
+                    break
                 else:
-                    if respond:
-                        logger.debug("Response: OK\n")
-                        await self.stream.send_all(b"OK\n")
+                    cmds.append((cmd, raw_line))
+                    if not cmdlist:break
+            logger.debug("Commands received.")
+            respond = False
+            try:
+                for c, raw_command in cmds:
+                    logger.debug("Command '{}'...", raw_command)
+                    respond_to_this, rspmsg = self.__cmdExec(c, raw_command)
+                    respond = respond or respond_to_this
+                    if inspect.isawaitable(rspmsg):
+                        rspmsg = await rspmsg
+                    async for response in rspmsg:
+                        logger.debug("Response: {}", response)
+                        await self.stream.send_all(response)
+                    if cmdlist=="list_ok":
+                        await self.stream.send_all(b"list_OK\n")
+            except MpdCommandError as e:
+                logger.info("Command Error: %s"%e.toMpdMsg())
+                await self.stream.send_all(e.toMpdMsg().encode('utf-8'))
+            else:
+                if respond:
+                    logger.debug("Response: OK\n")
+                    await self.stream.send_all(b"OK\n")
 
     def __cmdExec(self, cmd, raw_command):
         """ Execute mpd client command. Take a string, parse it and
