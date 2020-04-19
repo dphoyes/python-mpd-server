@@ -64,10 +64,7 @@ class MpdClient(WithDaemonTasks):
                             await self.wake.wait()
                             await stream.send_all(b"noidle\n")
                         await tasks.spawn(handle_wake_from_idle)
-                        async for line in self._iter_response(stream):
-                            prefix, subsystem = line.split(b':')
-                            assert prefix == b"changed"
-                            subsystem = subsystem.strip().decode('utf-8')
+                        async for subsystem in self._parse_list(self._iter_response(stream), b"changed"):
                             for c in self.idle_consumers:
                                 await c.result_q.put(subsystem)
                         await tasks.cancel_scope.cancel()
@@ -86,6 +83,13 @@ class MpdClient(WithDaemonTasks):
                 else:
                     raise MpdCommandError(command="?", msg="Received unparseable error from other MPD server")
             yield line
+
+    @staticmethod
+    async def _parse_list(response_lines, key):
+        async for line in response_lines:
+            k, v = line.split(b':')
+            assert k == key
+            yield v.strip().decode('utf-8')
 
     async def idle(self, *subsystems):
         consumer = IdleConsumer(subsystems)
@@ -110,4 +114,20 @@ class MpdClient(WithDaemonTasks):
                 return
             if isinstance(result, Exception):
                 raise result
-            yield result + b'\n'
+            yield result
+
+    async def command_returning_list(self, cmd, key):
+        return [x async for x in self._parse_list(self.raw_command(cmd), key)]
+
+    async def command_returning_nothing(self, cmd):
+        response = [x async for x in self.raw_command(cmd)]
+        assert len(response) == 0
+
+    async def listpartitions(self):
+        return await self.command_returning_list(b"listpartitions", b"partition")
+
+    async def partition(self, name):
+        if isinstance(name, str):
+            name = name.encode("utf8")
+        return await self.command_returning_nothing(b"partition " + name)
+

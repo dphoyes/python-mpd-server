@@ -378,6 +378,8 @@ class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
                     async for response in rspmsg:
                         logger.debug("Response: {}", response)
                         await self.stream.send_all(response)
+                        if not response.endswith(b'\n'):
+                            await self.stream.send_all(b'\n')
                     if cmdlist=="list_ok":
                         await self.stream.send_all(b"list_OK\n")
             except MpdCommandError as e:
