@@ -428,6 +428,8 @@ class MpdServer(object):
                     self.clients.add(handler)
                     try:
                         await handler.run()
+                    except BrokenPipeError:
+                        pass
                     finally:
                         self.clients.remove(handler)
                         logger.debug("Client connection closed")
