@@ -20,9 +20,9 @@ class CommandQueueItem:
 
 
 class MpdClient(WithDaemonTasks):
-    def __init__(self, host, port):
+    def __init__(self, host, port, default_partition=None):
         super().__init__()
-        self.host, self.port = host, port
+        self.host, self.port, self.default_partition = host, port, default_partition
         self.command_queue = anyio.create_queue(1)
         self.wake = anyio.create_event()
         self.idle_consumers = set()
@@ -34,6 +34,23 @@ class MpdClient(WithDaemonTasks):
         async with await anyio.connect_tcp(self.host, self.port) as stream:
             welcome = (await stream.receive_until(b'\n', 1024)).decode('utf-8').strip()
             logger.debug("Connected to MPD server at {}:{}: {}", self.host, self.port, welcome)
+
+            if self.default_partition is not None:
+                for _ in range(3):
+                    await stream.send_all(f"partition {self.default_partition}\n".encode('utf8'))
+                    try:
+                        async for line in self._iter_response(stream):
+                            raise RuntimeError("Unexpected response")
+                        logger.debug("Switched to partition {}", self.default_partition)
+                        break
+                    except MpdCommandError:
+                        pass
+                    await stream.send_all(f"newpartition {self.default_partition}\n".encode('utf8'))
+                    async for line in self._iter_response(stream):
+                        raise RuntimeError("Unexpected response")
+                else:
+                    raise RuntimeError(f"Unable to change partition to {self.default_partition}")
+
             while True:
                 cmd = None
                 async with anyio.move_on_after(0.1):
