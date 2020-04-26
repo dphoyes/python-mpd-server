@@ -108,7 +108,7 @@ class MpdClient(WithDaemonTasks):
                     else:
                         subsystems = {s for c in self.idle_consumers for s in c.subsystems}
                     self.wake.clear()
-                    logger.debug("Entering idle")
+                    logger.debug("Entering idle: {}", subsystems)
                     await stream.send_all("idle {}\n".format(' '.join(subsystems)).encode('utf-8'))
                     async with anyio.create_task_group() as tasks:
                         async def handle_wake_from_idle():
@@ -117,7 +117,8 @@ class MpdClient(WithDaemonTasks):
                         await tasks.spawn(handle_wake_from_idle)
                         async for subsystem in parse_list(self._iter_response(stream), b"changed"):
                             for c in self.idle_consumers:
-                                await c.result_q.put(subsystem)
+                                if not c.subsystems or subsystem in c.subsystems:
+                                    await c.result_q.put(subsystem)
                         await tasks.cancel_scope.cancel()
                     await self.wake.set()
 
@@ -135,8 +136,11 @@ class MpdClient(WithDaemonTasks):
                     raise MpdCommandError(command="?", msg="Received unparseable error from other MPD server")
             yield line
 
-    async def idle(self, *subsystems):
-        consumer = IdleConsumer(subsystems)
+    async def idle(self, *subsystems, initial_trigger):
+        if initial_trigger:
+            for x in subsystems:
+                yield x
+        consumer = IdleConsumer(frozenset(subsystems))
         try:
             self.idle_consumers.add(consumer)
             await self.wake.set()
@@ -177,4 +181,3 @@ class MpdClient(WithDaemonTasks):
         if isinstance(name, str):
             name = name.encode("utf8")
         return await self.command_returning_nothing(b"partition " + name)
-
