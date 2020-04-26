@@ -19,6 +19,40 @@ class CommandQueueItem:
         self.result_q = anyio.create_queue(1)
 
 
+async def parse_raw_key_value_pairs(response_lines):
+    async for line in response_lines:
+        k, v = line.split(b':', maxsplit=1)
+        yield k, v.strip()
+
+
+async def parse_raw_objects(response_lines, delimiter):
+    if isinstance(delimiter, bytes):
+        delimiter = delimiter,
+    obj = None
+    async for k, v in parse_raw_key_value_pairs(response_lines):
+        if k in delimiter:
+            if obj:
+                yield obj
+            obj = {k: v}
+        elif k in obj:
+            obj_k = obj[k]
+            if not isinstance(obj_k, list):
+                obj[k] = obj_k = [obj_k]
+            obj_k.append(v)
+        else:
+            obj[k] = v
+    if obj:
+        yield obj
+
+
+async def parse_list(response_lines, key, ignore_other_keys=False):
+    async for k, v in parse_raw_key_value_pairs(response_lines):
+        if k == key:
+            yield v.decode('utf-8')
+        elif not ignore_other_keys:
+            raise AssertionError(f"Unexpected key: {k}")
+
+
 class MpdClient(WithDaemonTasks):
     def __init__(self, host, port, default_partition=None):
         super().__init__()
@@ -81,7 +115,7 @@ class MpdClient(WithDaemonTasks):
                             await self.wake.wait()
                             await stream.send_all(b"noidle\n")
                         await tasks.spawn(handle_wake_from_idle)
-                        async for subsystem in self._parse_list(self._iter_response(stream), b"changed"):
+                        async for subsystem in parse_list(self._iter_response(stream), b"changed"):
                             for c in self.idle_consumers:
                                 await c.result_q.put(subsystem)
                         await tasks.cancel_scope.cancel()
@@ -100,13 +134,6 @@ class MpdClient(WithDaemonTasks):
                 else:
                     raise MpdCommandError(command="?", msg="Received unparseable error from other MPD server")
             yield line
-
-    @staticmethod
-    async def _parse_list(response_lines, key):
-        async for line in response_lines:
-            k, v = line.split(b':')
-            assert k == key
-            yield v.strip().decode('utf-8')
 
     async def idle(self, *subsystems):
         consumer = IdleConsumer(subsystems)
@@ -134,7 +161,10 @@ class MpdClient(WithDaemonTasks):
             yield result
 
     async def command_returning_list(self, cmd, key):
-        return [x async for x in self._parse_list(self.raw_command(cmd), key)]
+        return [x async for x in parse_list(self.raw_command(cmd), key)]
+
+    async def command_returning_raw_objects(self, cmd, *args, **kwargs):
+        return [x async for x in parse_raw_objects(self.raw_command(cmd), *args, **kwargs)]
 
     async def command_returning_nothing(self, cmd):
         response = [x async for x in self.raw_command(cmd)]
