@@ -28,7 +28,7 @@ async def parse_raw_key_value_pairs(response_lines):
 async def parse_raw_objects(response_lines, delimiter):
     if isinstance(delimiter, bytes):
         delimiter = delimiter,
-    obj = None
+    obj = {}
     async for k, v in parse_raw_key_value_pairs(response_lines):
         if k in delimiter:
             if obj:
@@ -43,6 +43,17 @@ async def parse_raw_objects(response_lines, delimiter):
             obj[k] = v
     if obj:
         yield obj
+
+
+async def parse_raw_object(response_lines):
+    ret = [x async for x in parse_raw_objects(response_lines, delimiter=())]
+    len_ret = len(ret)
+    if len_ret == 0:
+        return {}
+    elif len_ret > 1:
+        raise AssertionError("Multiple objects returned")
+    else:
+        return ret[0]
 
 
 async def parse_list(response_lines, key, ignore_other_keys=False):
@@ -169,6 +180,9 @@ class MpdClient(WithDaemonTasks):
 
     async def command_returning_raw_objects(self, cmd, *args, **kwargs):
         return [x async for x in parse_raw_objects(self.raw_command(cmd), *args, **kwargs)]
+
+    async def command_returning_raw_object(self, cmd):
+        return await parse_raw_object(self.raw_command(cmd))
 
     async def command_returning_nothing(self, cmd):
         response = [x async for x in self.raw_command(cmd)]
