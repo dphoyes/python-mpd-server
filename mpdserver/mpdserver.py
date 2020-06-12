@@ -229,6 +229,8 @@ class MpdClientHandlerBase(object):
             'listplaylists'            :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'load'            :{'class':None,'users':[],'group':'write','mpdVersion':"0.12",'neededBy':None},
             'save'            :{'class':None,'users':[],'group':'write','mpdVersion':"0.12",'neededBy':None},
+            'albumart'            :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
+            'readpicture'            :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'search'            :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'searchadd'         :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'searchaddpl'       :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
