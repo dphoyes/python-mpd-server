@@ -31,6 +31,8 @@ from __future__ import absolute_import
 
 import anyio
 import threading
+import operator
+import itertools
 import sys
 #from pimp.core.playlist import *
 #from pimp.core.player import *
@@ -332,6 +334,7 @@ class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
 
         re_command_list_begin = re.compile(b"^command_list_(ok_)?begin\n$")
         re_line = re.compile(b"[^\n]+\n")
+        cmdlist_handler_getter = operator.attrgetter("CommandListHandler")
 
         while True:
             try:
@@ -354,11 +357,12 @@ class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
 
             try:
                 logger.info("Received MPD commands: {}", [c.raw_command for c in cmds])
-                for command in cmds:
-                    async for chunk in command.run():
+                for list_handler_cls, group in itertools.groupby(cmds, key=cmdlist_handler_getter):
+                    group = list(group)
+                    if len(group) <= 1:
+                        list_handler_cls = CommandListDefault
+                    async for chunk in list_handler_cls(group, list_ok=list_ok, client=self).run():
                         await self.stream.send_all(chunk)
-                    if list_ok:
-                        await self.stream.send_all(b"list_OK\n")
             except MpdCommandError as e:
                 logger.info("Command Error: %s"%e.toMpdMsg())
                 await self.stream.send_all(e.toMpdMsg().encode('utf-8'))

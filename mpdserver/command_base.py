@@ -59,29 +59,9 @@ async def _async_yield_from_if_generator(arg, default):
             yield value
 
 
-class CommandBase(object):
-    respond = True
-
-    formatArg=()
-    varArg=False
-    listArg=False
-    """ To specify command arguments format. For example, ::
-
-       formatArg=[("song",OptStr)]
-
-    means command accept a optionnal
-    string argument bound to `song` attribute name."""
-
-    def __init__(self, command, client):
-        self.raw_command = command
+class HandlerBase(object):
+    def __init__(self, client):
         self.client = client
-
-    @classmethod
-    def GetCommandName(cls):
-        """ MPD command name. Command name is the lower class
-        name. This string is used to parse a client request. You can
-        override this classmethod to define particular commandname."""
-        return cls.__name__.lower()
 
     @property
     def frontend(self):
@@ -97,6 +77,51 @@ class CommandBase(object):
 
     def notify_idle(self, subsystem):
         return self.server.notify_idle(subsystem)
+
+
+class CommandListBase(HandlerBase):
+    def __init__(self, commands, list_ok: bool, client):
+        super().__init__(client=client)
+        self.commands = commands
+        self.list_ok = list_ok
+
+    async def run(self):
+        raise NotImplementedError
+
+
+class CommandListDefault(CommandListBase):
+    async def run(self):
+        for command in self.commands:
+            async for chunk in command.run():
+                yield chunk
+            if self.list_ok:
+                yield b"list_OK\n"
+
+
+class CommandBase(HandlerBase):
+    respond = True
+    CommandListHandler = CommandListDefault
+
+    formatArg=()
+    varArg=False
+    listArg=False
+    """ To specify command arguments format. For example, ::
+
+       formatArg=[("song",OptStr)]
+
+    means command accept a optionnal
+    string argument bound to `song` attribute name."""
+
+    def __init__(self, command, client):
+        super().__init__(client=client)
+        self.raw_command = command
+
+    @classmethod
+    def GetCommandName(cls):
+        """ MPD command name. Command name is the lower class
+        name. This string is used to parse a client request. You can
+        override this classmethod to define particular commandname."""
+        return cls.__name__.lower()
 
     async def run(self):
         raise NotImplementedError
