@@ -272,6 +272,7 @@ class MpdClientHandlerBase(object):
             class which inherits from :class:`command_base.Command`."""
             cls.__SupportedCommands[cls_cmd.GetCommandName()]['class']=cls_cmd
             for a in users : cls.__SupportedCommands[cls_cmd.GetCommandName()]['users'].append(a)
+            return cls_cmd
         cls.define_commands(RegisterCommand)
 
         def UserPermissionsCommand(user, commandName=None, group=None):
