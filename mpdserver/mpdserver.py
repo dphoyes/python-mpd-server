@@ -374,13 +374,9 @@ class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
                     logger.debug("Command '{}'...", raw_command)
                     respond_to_this, rspmsg = self.__cmdExec(c, raw_command)
                     respond = respond or respond_to_this
-                    if inspect.isawaitable(rspmsg):
-                        rspmsg = await rspmsg
                     async for response in rspmsg:
                         logger.debug("Response: {}", response)
                         await self.stream.send_all(response)
-                        if not response.endswith(b'\n'):
-                            await self.stream.send_all(b'\n')
                     if cmdlist=="list_ok":
                         await self.stream.send_all(b"list_OK\n")
             except MpdCommandError as e:

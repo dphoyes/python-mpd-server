@@ -46,6 +46,18 @@ async def _await_if_awaitable(x):
         return x
 
 
+async def _async_yield_from_if_generator(arg, default):
+    if inspect.isasyncgen(arg):
+        async for value in arg:
+            yield value
+    elif inspect.isgenerator(arg):
+        for value in arg:
+            yield value
+    else:
+        for value in default:
+            yield value
+
+
 class CommandBase(object):
     respond = True
 
@@ -122,7 +134,10 @@ class Command(CommandBase):
         try:
             await _await_if_awaitable(self.handle_args(**(self.args)))
             result = await _await_if_awaitable(self.toMpdMsg())
-            yield result.encode('utf-8')
+            async for x in _async_yield_from_if_generator(result, (result,)):
+                if isinstance(x, str):
+                    x = x.encode('utf-8')
+                yield x
         except NotImplementedError as e:
             raise errors.CommandNotImplemented(self.__class__,str(e))
 
@@ -162,7 +177,8 @@ class Command(CommandBase):
     def toMpdMsg(self):
         """ Override this method to send a specific respond to mpd client."""
         logger.debug("Not implemented respond for command %s"%self.__class__)
-        return ""
+        return
+        yield
 
 class CommandDummy(Command):
     def toMpdMsg(self):
@@ -177,8 +193,10 @@ class CommandItems(Command):
         must return a list a tuples ("key",value)."""
         return []
     async def toMpdMsg(self):
+        to_bytes = lambda x: x if isinstance(x, bytes) else str(x).encode('utf8')
         items = await _await_if_awaitable(self.items())
-        return ''.join("{}: {}\n".format(i,v) for i,v in items)
+        async for i,v in _async_yield_from_if_generator(items, items):
+            yield b''.join(token for token in (to_bytes(i), b': ', to_bytes(v), b'\n'))
 
 class CommandSongs(Command):
     """ This is a subclass of :class:`Command` class. Respond songs
