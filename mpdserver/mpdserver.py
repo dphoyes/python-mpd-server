@@ -39,7 +39,7 @@ import sys
 from .command_base import *
 from .command_skel import *
 from .errors import *
-from .utils import WithAsyncExitStack, WithDaemonTasks
+from .utils import WithAsyncExitStack, WithDaemonTasks, StreamBuffer
 from .logging import Logger
 
 logger = Logger(__name__)
@@ -122,7 +122,7 @@ class IdleState(object):
         logger.debug("Changed subsystems: {}", changed_subsystems)
         return changed_subsystems
 
-    async def wait_or_noidle(self, subsystems, client_reader):
+    async def wait_or_noidle(self, subsystems, client_stream):
         changed_subsystems = []
 
         async with anyio.create_task_group() as tg:
@@ -132,31 +132,14 @@ class IdleState(object):
             await tg.spawn(wait_for_change)
 
             async def wait_for_noidle():
-                line = await client_reader.readline()
-                if line.split(maxsplit=1)[0] != b"noidle":
+                line = await client_stream.extract_until(b"\n")
+                if line != b"noidle\n":
                     raise MpdCommandError(command=line, msg="The only valid command in idle state is noidle")
                 logger.debug("Received noidle")
                 await tg.cancel_scope.cancel()
             await tg.spawn(wait_for_noidle)
 
         return changed_subsystems
-
-
-class CommandReader(WithDaemonTasks):
-    def __init__(self, stream):
-        super().__init__()
-        self.stream = stream
-        self.lines = anyio.create_queue(1)
-
-    async def _spawn_daemon_tasks(self, tasks):
-        await tasks.spawn(self.__run)
-
-    async def __run(self):
-        async for line in self.stream.receive_delimited_chunks(b'\n', 1024):
-            await self.lines.put(line)
-
-    async def readline(self):
-        return await self.lines.get()
 
 
 class MpdClientHandlerBase(object):
@@ -334,15 +317,11 @@ class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
 
     def __init__(self, stream, server):
         super().__init__()
-        self.reader = CommandReader(stream)
-        self.stream = stream
+        self.stream = StreamBuffer(stream)
         self.server = server
         self.frontend = Frontend()
         self.idle = IdleState()
         logger.debug( "Client connected (%s)" % threading.currentThread().getName())
-
-    async def _init_exit_stack(self, stack):
-        await stack.enter_async_context(self.reader)
 
     async def run(self):
         """Handle connection with mpd client. It gets client command,
@@ -355,7 +334,7 @@ class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
             while True:
                 try:
                     async with anyio.fail_after(10):
-                        raw_line = await self.reader.readline()
+                        raw_line = await self.stream.extract_until(b"\n")
                 except TimeoutError:
                     logger.debug("Client connection timed out")
                     return
