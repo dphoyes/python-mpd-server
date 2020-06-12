@@ -423,16 +423,17 @@ class MpdServer(object):
         logger.info("Mpd Server is listening on port " + str(self.port))
 
         async def handle_client(client):
-            async with client:
-                async with self.ClientHandler(client, self) as handler:
-                    self.clients.add(handler)
-                    try:
-                        await handler.run()
-                    except BrokenPipeError:
-                        pass
-                    finally:
-                        self.clients.remove(handler)
-                        logger.debug("Client connection closed")
+            try:
+                async with client:
+                    async with self.ClientHandler(client, self) as handler:
+                        self.clients.add(handler)
+                        try:
+                            await handler.run()
+                        finally:
+                            self.clients.remove(handler)
+                            logger.debug("Client connection closed")
+            except ConnectionError:
+                pass
 
         async with anyio.create_task_group() as tasks:
             async with await anyio.create_tcp_server(self.port) as srv:
