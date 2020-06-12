@@ -22,6 +22,3 @@ class StyleAdapter(logging.LoggerAdapter):
 
 def Logger(name):
     return StyleAdapter(logging.getLogger(name), {})
-
-
-logging.basicConfig(level=logging.DEBUG)
