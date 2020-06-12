@@ -2,7 +2,7 @@ import anyio
 import re
 
 from .errors import MpdCommandError
-from .utils import WithDaemonTasks
+from .utils import WithDaemonTasks, StreamBuffer
 from .logging import Logger
 
 logger = Logger(__name__)
@@ -14,15 +14,16 @@ class IdleConsumer:
         self.result_q = anyio.create_queue(1)
 
 class CommandQueueItem:
-    def __init__(self, x):
+    def __init__(self, x, forwarding_mode):
         self.command = x
+        self.forwarding_mode = forwarding_mode
         self.result_q = anyio.create_queue(1)
 
 
 async def parse_raw_key_value_pairs(response_lines):
     async for line in response_lines:
         k, v = line.split(b':', maxsplit=1)
-        yield k, v.strip()
+        yield bytes(k), bytes(v.strip())
 
 
 async def parse_raw_objects(response_lines, delimiter):
@@ -77,7 +78,8 @@ class MpdClient(WithDaemonTasks):
 
     async def _run(self):
         async with await anyio.connect_tcp(self.host, self.port) as stream:
-            welcome = (await stream.receive_until(b'\n', 1024)).decode('utf-8').strip()
+            stream = StreamBuffer(stream)
+            welcome = (await stream.extract_until(b'\n')).decode('utf-8').strip()
             logger.debug("Connected to MPD server at {}:{}: {}", self.host, self.port, welcome)
 
             if self.default_partition is not None:
@@ -106,8 +108,12 @@ class MpdClient(WithDaemonTasks):
                     if not cmd.command.endswith(b'\n'):
                         await stream.send_all(b'\n')
                     try:
-                        async for line in self._iter_response(stream):
-                            await cmd.result_q.put(line)
+                        if cmd.forwarding_mode:
+                            async for chunk in stream.forward_mpd_response():
+                                await cmd.result_q.put(chunk)
+                        else:
+                            async for line in self._iter_response(stream):
+                                await cmd.result_q.put(line)
                     except MpdCommandError as e:
                         await cmd.result_q.put(e)
                     await cmd.result_q.put(None)
@@ -126,18 +132,21 @@ class MpdClient(WithDaemonTasks):
                             await self.wake.wait()
                             await stream.send_all(b"noidle\n")
                         await tasks.spawn(handle_wake_from_idle)
-                        async for subsystem in parse_list(self._iter_response(stream), b"changed"):
+                        changed = [s async for s in parse_list(self._iter_response(stream), b"changed")]
+                        if changed:
                             for c in self.idle_consumers:
-                                if not c.subsystems or subsystem in c.subsystems:
-                                    await c.result_q.put(subsystem)
+                                changed_for_consumer = [s for s in changed if s in c.subsystems] if c.subsystems else changed
+                                if changed_for_consumer:
+                                    await c.result_q.put(changed_for_consumer)
                         await tasks.cancel_scope.cancel()
                     await self.wake.set()
 
     @staticmethod
     async def _iter_response(stream):
-        async for line in stream.receive_delimited_chunks(b'\n', 1024):
+        while True:
+            line = await stream.extract_until(b'\n')
             logger.debug("_iter_response: Got line {}", line)
-            if line == b"OK":
+            if line == b"OK\n":
                 return
             if line.startswith(b"ACK "):
                 parsed = re.match(r"ACK \[[^\[\]]+\] {([^{}]+)}(.*)", line.decode('utf-8'))
@@ -147,23 +156,30 @@ class MpdClient(WithDaemonTasks):
                     raise MpdCommandError(command="?", msg="Received unparseable error from other MPD server")
             yield line
 
-    async def idle(self, *subsystems, initial_trigger):
+    async def idle(self, *subsystems, initial_trigger=False, split=True):
         if initial_trigger:
-            for x in subsystems:
-                yield x
+            if split:
+                for x in subsystems:
+                    yield x
+            else:
+                yield tuple(subsystems)
         consumer = IdleConsumer(frozenset(subsystems))
         try:
             self.idle_consumers.add(consumer)
             await self.wake.set()
             while True:
-                x = await consumer.result_q.get()
-                logger.debug("Idle got {}", x)
-                yield x
+                changed = await consumer.result_q.get()
+                logger.debug("Idle got {}", changed)
+                if split:
+                    for s in changed:
+                        yield s
+                else:
+                    yield tuple(changed)
         finally:
             self.idle_consumers.remove(consumer)
 
-    async def raw_command(self, line):
-        item = CommandQueueItem(line)
+    async def raw_command(self, line, forwarding_mode=False):
+        item = CommandQueueItem(line, forwarding_mode)
         logger.debug("Sending command to queue: {}", line)
         await self.command_queue.put(item)
         await self.wake.set()
