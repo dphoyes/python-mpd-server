@@ -276,9 +276,10 @@ class MpdClientHandlerBase(object):
             for cmd in cls.__SupportedCommands.values():
                 cmd['users'].append(u)
 
-    def _getCommandClass(self,commandName,frontend):
+    def _make_command_object(self, raw_line):
         """ To get a command class to execute on received command
         string. This method raise supported command errors."""
+        commandName = raw_line.split(maxsplit=1)[0].decode('utf8')
         if commandName not in self.__SupportedCommands:
             logger.warning("Command '%s' is not a MPD command!" % commandName)
             raise CommandNotMPDCommand(commandName)
@@ -288,10 +289,11 @@ class MpdClientHandlerBase(object):
             logger.warning("Command '%s' is not supported!" % commandName)
             raise CommandNotSupported(commandName)
         elif not (Frontend.GetDefaultUsername() in self.__SupportedCommands[commandName]['users']
-                  or frontend.getUsername() in self.__SupportedCommands[commandName]['users']):
-            raise UserNotAllowed(commandName,frontend.getUsername())
+                  or self.frontend.getUsername() in self.__SupportedCommands[commandName]['users']):
+            raise UserNotAllowed(commandName,self.frontend.getUsername())
         else :
-            return self.__SupportedCommands[commandName]['class']
+            cls = self.__SupportedCommands[commandName]['class']
+            return cls(raw_line, client=self)
 
     @classmethod
     def define_commands(cls, register):
@@ -328,61 +330,42 @@ class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
         execute it and send a respond."""
         await self.stream.send_all("OK MPD 0.21.11\n".encode('utf-8'))
 
+        re_command_list_begin = re.compile(b"^command_list_(ok_)?begin\n$")
+        re_line = re.compile(b"[^\n]+\n")
+
         while True:
-            cmdlist=None
-            cmds=[]
-            while True:
-                try:
-                    async with anyio.fail_after(10):
-                        raw_line = await self.stream.extract_until(b"\n")
-                except TimeoutError:
-                    logger.debug("Client connection timed out")
-                    return
-                cmd = raw_line.split(maxsplit=1)[0].decode('utf-8')
-                if cmd == "command_list_ok_begin":
-                    cmdlist="list_ok"
-                elif cmd == "command_list_begin":
-                    cmdlist="list"
-                elif cmd == "command_list_end":
-                    break
-                else:
-                    cmds.append((cmd, raw_line))
-                    if not cmdlist:break
-            logger.debug("Commands received.")
-            respond = False
             try:
-                for c, raw_command in cmds:
-                    logger.debug("Command '{}'...", raw_command)
-                    respond_to_this, rspmsg = self.__cmdExec(c, raw_command)
-                    respond = respond or respond_to_this
-                    async for response in rspmsg:
-                        logger.debug("Response: {}", response)
-                        await self.stream.send_all(response)
-                    if cmdlist=="list_ok":
+                async with anyio.fail_after(10):
+                    raw_line = await self.stream.extract_until(b"\n")
+                cmdlist_match = re_command_list_begin.match(raw_line)
+                if cmdlist_match is None:
+                    list_ok = False
+                    cmds = [self._make_command_object(raw_line)]
+                else:
+                    list_ok = cmdlist_match.group(1) is not None
+                    async with anyio.fail_after(20):
+                        rest = await self.stream.extract_until(b"command_list_end\n")
+                    lines = re_line.findall(rest)
+                    del lines[-1]
+                    cmds = [self._make_command_object(raw_line) for raw_line in lines]
+            except TimeoutError:
+                logger.debug("Client connection timed out")
+                return
+
+            try:
+                logger.info("Received MPD commands: {}", [c.raw_command for c in cmds])
+                for command in cmds:
+                    async for chunk in command.run():
+                        await self.stream.send_all(chunk)
+                    if list_ok:
                         await self.stream.send_all(b"list_OK\n")
             except MpdCommandError as e:
                 logger.info("Command Error: %s"%e.toMpdMsg())
                 await self.stream.send_all(e.toMpdMsg().encode('utf-8'))
             else:
-                if respond:
+                if any(c.respond for c in cmds):
                     logger.debug("Response: OK\n")
                     await self.stream.send_all(b"OK\n")
-
-    def __cmdExec(self, cmd, raw_command):
-        """ Execute mpd client command. Take a string, parse it and
-        execute the corresponding server.Command function."""
-        try:
-            logger.debug("Command executed : {} for frontend '{}'", raw_command, self.frontend.get())
-            commandCls = self._getCommandClass(cmd,self.frontend)
-            msg = commandCls(raw_command, client=self).run()
-        except MpdCommandError:
-            raise
-        except CommandNotSupported:
-            raise
-        except :
-            logger.critical("Unexpected error on command %s (%s): %s" % (raw_command,self.frontend.get(),sys.exc_info()[0]))
-            raise
-        return (commandCls.respond, msg)
 
 
 class MpdServer(object):
