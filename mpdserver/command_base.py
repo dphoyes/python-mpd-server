@@ -31,6 +31,7 @@ from __future__ import print_function
 from __future__ import absolute_import
 import inspect
 import re
+import shlex
 from . import errors
 from .logging import Logger
 
@@ -61,6 +62,16 @@ async def _async_yield_from_if_generator(arg, default):
 class CommandBase(object):
     respond = True
 
+    formatArg=()
+    varArg=False
+    listArg=False
+    """ To specify command arguments format. For example, ::
+
+       formatArg=[("song",OptStr)]
+
+    means command accept a optionnal
+    string argument bound to `song` attribute name."""
+
     def __init__(self, command, client):
         self.raw_command = command
         self.client = client
@@ -90,58 +101,8 @@ class CommandBase(object):
     async def run(self):
         raise NotImplementedError
 
-
-class Command(CommandBase):
-    """ Command class is the base command class. You can define
-    argument format by setting :attr:`formatArg`. Command argument
-    can be accessed with :attr:`args` dictionnary.
-
-    Each command has a playlist attribute which is given by
-    MpdRequestHandler. This playlist must implement MpdPlaylist class
-    and by default, this one is used.
-
-    :class:`Command` contains command
-    arguments definition via :attr:`Command.formatArg`. You can handle
-    them with :func:`Command.handle_args`. An argument is :
-
-    - an int
-    - a string
-    - an optionnal int (:class:`OptInt`)
-    - an optionnal string (:class:`OptStr`)
-
-    """
-
-    formatArg=[]
-    varArg=False
-    listArg=False
-    """ To specify command arguments format. For example, ::
-
-       formatArg=[("song",OptStr)]
-
-    means command accept a optionnal
-    string argument bound to `song` attribute name."""
-    args={}
-    """ A dictionnary of received arguments from mpd client. They must
-    be defined in :attr:`formatArg`."""
-
-    def __init__(self, command, client):
-        super().__init__(command, client)
-        args = [m.group().replace('"', '') for m in re.compile(r'(\w+)|("([^"])+")').finditer(command.decode('utf-8'))][1:] # WARNING An argument cannot contains a '"'
-        self.args = self.__parseArg(args)
-
-    async def run(self):
-        """To treat a command. This class handle_args method and toMpdMsg method."""
-        try:
-            await _await_if_awaitable(self.handle_args(**(self.args)))
-            result = await _await_if_awaitable(self.toMpdMsg())
-            async for x in _async_yield_from_if_generator(result, (result,)):
-                if isinstance(x, str):
-                    x = x.encode('utf-8')
-                yield x
-        except NotImplementedError as e:
-            raise errors.CommandNotImplemented(self.__class__,str(e))
-
-    def __parseArg(self,args):
+    def parse_args(self):
+        args = shlex.split(self.raw_command.decode('utf-8'))[1:]
         if self.listArg == True:
             d = dict()
             d['args'] = args
@@ -170,6 +131,43 @@ class Command(CommandBase):
         except ValueError as e:
             raise CommandArgumentException("Wrong argument type: %s command arguments should be %s instead of %s (%s)" %(self.__class__,self.formatArg,args,e))
         return d
+
+
+class Command(CommandBase):
+    """ Command class is the base command class. You can define
+    argument format by setting :attr:`formatArg`. Command argument
+    can be accessed with :attr:`args` dictionnary.
+
+    Each command has a playlist attribute which is given by
+    MpdRequestHandler. This playlist must implement MpdPlaylist class
+    and by default, this one is used.
+
+    :class:`Command` contains command
+    arguments definition via :attr:`Command.formatArg`. You can handle
+    them with :func:`Command.handle_args`. An argument is :
+
+    - an int
+    - a string
+    - an optionnal int (:class:`OptInt`)
+    - an optionnal string (:class:`OptStr`)
+
+    """
+
+    def __init__(self, command, client):
+        super().__init__(command, client)
+        self.args = self.parse_args()
+
+    async def run(self):
+        """To treat a command. This class handle_args method and toMpdMsg method."""
+        try:
+            await _await_if_awaitable(self.handle_args(**(self.args)))
+            result = await _await_if_awaitable(self.toMpdMsg())
+            async for x in _async_yield_from_if_generator(result, (result,)):
+                if isinstance(x, str):
+                    x = x.encode('utf-8')
+                yield x
+        except NotImplementedError as e:
+            raise errors.CommandNotImplemented(self.__class__,str(e))
 
     def handle_args(self,**kwargs):
         """ Override this method to treat commands arguments."""
