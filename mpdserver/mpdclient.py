@@ -66,7 +66,7 @@ async def parse_list(response_lines, key, ignore_other_keys=False):
 
 
 class MpdClient(WithDaemonTasks):
-    def __init__(self, host, port, default_partition=None):
+    def __init__(self, host, port=6600, default_partition=None):
         super().__init__()
         self.host, self.port, self.default_partition = host, port, default_partition
         self.command_queue = anyio.create_queue(1)
@@ -76,8 +76,14 @@ class MpdClient(WithDaemonTasks):
     async def _spawn_daemon_tasks(self, tasks):
         await tasks.spawn(self._run)
 
+    def _connect(self):
+        if self.host.startswith('/'):
+            return anyio.connect_unix(self.host)
+        else:
+            return anyio.connect_tcp(self.host, self.port)
+
     async def _run(self):
-        async with await anyio.connect_tcp(self.host, self.port) as stream:
+        async with await self._connect() as stream:
             stream = StreamBuffer(stream)
             welcome = (await stream.extract_until(b'\n')).decode('utf-8').strip()
             logger.debug("Connected to MPD server at {}:{}: {}", self.host, self.port, welcome)
