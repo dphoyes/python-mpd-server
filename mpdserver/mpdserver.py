@@ -120,7 +120,7 @@ class IdleState(object):
         for name, event in self.events.items():
             if event.is_set():
                 changed_subsystems.append(name)
-                event.clear()
+                self.events[name] = anyio.create_event()
         logger.debug("Changed subsystems: {}", changed_subsystems)
         return changed_subsystems
 
@@ -400,10 +400,8 @@ class MpdServer(object):
             except ConnectionError:
                 pass
 
-        async with anyio.create_task_group() as tasks:
-            async with await anyio.create_tcp_server(self.port) as srv:
-                async for client in srv.accept_connections():
-                    await tasks.spawn(handle_client, client)
+        listener = await anyio.create_tcp_listener(local_port=self.port)
+        await listener.serve(handle_client)
 
     async def notify_idle(self, subsystem):
         for c in self.clients:

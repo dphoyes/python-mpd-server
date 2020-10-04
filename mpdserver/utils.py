@@ -1,5 +1,5 @@
 import re
-import anyio
+import anyio.abc
 import contextlib
 from . import errors
 
@@ -36,15 +36,15 @@ class WithDaemonTasks(WithAsyncExitStack):
 
 
 class StreamBuffer:
-    def __init__(self, stream: anyio.Stream):
+    def __init__(self, stream: anyio.abc.ByteStream):
         self._stream = stream
         self._data = bytearray()
 
     async def send_all(self, data):
-        return await self._stream.send_all(data)
+        return await self._stream.send(data)
 
     async def _fetch_more(self):
-        new_bytes = await self._stream.receive_some(1 << 20)
+        new_bytes = await self._stream.receive(1 << 20)
         if new_bytes:
             self._data += new_bytes
         else:

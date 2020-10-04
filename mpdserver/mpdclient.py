@@ -11,13 +11,13 @@ logger = Logger(__name__)
 class IdleConsumer:
     def __init__(self, x):
         self.subsystems = x
-        self.result_q = anyio.create_queue(1)
+        self.result_q = anyio.streams.stapled.StapledObjectStream(*anyio.create_memory_object_stream(1))
 
 class CommandQueueItem:
     def __init__(self, x, forwarding_mode):
         self.command = x
         self.forwarding_mode = forwarding_mode
-        self.result_q = anyio.create_queue(1)
+        self.result_q = anyio.streams.stapled.StapledObjectStream(*anyio.create_memory_object_stream(1))
 
 
 async def parse_raw_key_value_pairs(response_lines):
@@ -69,7 +69,9 @@ class MpdClient(WithDaemonTasks):
     def __init__(self, host, port=6600, default_partition=None):
         super().__init__()
         self.host, self.port, self.default_partition = host, port, default_partition
-        self.command_queue = anyio.create_queue(1)
+        self.command_queue = anyio.streams.stapled.StapledObjectStream(
+            *anyio.create_memory_object_stream(1, item_type=CommandQueueItem)
+        )
         self.wake = anyio.create_event()
         self.idle_consumers = set()
 
@@ -107,7 +109,7 @@ class MpdClient(WithDaemonTasks):
             while True:
                 cmd = None
                 async with anyio.move_on_after(0.1):
-                    cmd = await self.command_queue.get()
+                    cmd = await self.command_queue.receive()
                 if cmd is not None:
                     logger.debug("Writing command: {}", cmd.command)
                     await stream.send_all(cmd.command)
@@ -116,13 +118,13 @@ class MpdClient(WithDaemonTasks):
                     try:
                         if cmd.forwarding_mode:
                             async for chunk in stream.forward_mpd_response():
-                                await cmd.result_q.put(chunk)
+                                await cmd.result_q.send(chunk)
                         else:
                             async for line in self._iter_response(stream):
-                                await cmd.result_q.put(line)
+                                await cmd.result_q.send(line)
                     except MpdCommandError as e:
-                        await cmd.result_q.put(e)
-                    await cmd.result_q.put(None)
+                        await cmd.result_q.send(e)
+                    await cmd.result_q.send(None)
                 else:
                     if not self.idle_consumers:
                         subsystems = "database",
@@ -130,7 +132,7 @@ class MpdClient(WithDaemonTasks):
                         subsystems = ()
                     else:
                         subsystems = {s for c in self.idle_consumers for s in c.subsystems}
-                    self.wake.clear()
+                    self.wake = anyio.create_event()
                     logger.debug("Entering idle: {}", subsystems)
                     await stream.send_all("idle {}\n".format(' '.join(subsystems)).encode('utf-8'))
                     async with anyio.create_task_group() as tasks:
@@ -143,7 +145,7 @@ class MpdClient(WithDaemonTasks):
                             for c in self.idle_consumers:
                                 changed_for_consumer = [s for s in changed if s in c.subsystems] if c.subsystems else changed
                                 if changed_for_consumer:
-                                    await c.result_q.put(changed_for_consumer)
+                                    await c.result_q.send(changed_for_consumer)
                         await tasks.cancel_scope.cancel()
                     await self.wake.set()
 
@@ -174,7 +176,7 @@ class MpdClient(WithDaemonTasks):
             self.idle_consumers.add(consumer)
             await self.wake.set()
             while True:
-                changed = await consumer.result_q.get()
+                changed = await consumer.result_q.receive()
                 logger.debug("Idle got {}", changed)
                 if split:
                     for s in changed:
@@ -187,10 +189,10 @@ class MpdClient(WithDaemonTasks):
     async def raw_command(self, line, forwarding_mode=False):
         item = CommandQueueItem(line, forwarding_mode)
         logger.debug("Sending command to queue: {}", line)
-        await self.command_queue.put(item)
+        await self.command_queue.send(item)
         await self.wake.set()
         while True:
-            result = await item.result_q.get()
+            result = await item.result_q.receive()
             if result is None:
                 return
             if isinstance(result, Exception):
