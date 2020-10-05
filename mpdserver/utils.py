@@ -44,11 +44,14 @@ class StreamBuffer:
         return await self._stream.send(data)
 
     async def _fetch_more(self):
-        new_bytes = await self._stream.receive(1 << 20)
+        try:
+            new_bytes = await self._stream.receive(1 << 20)
+        except anyio.EndOfStream:
+            raise ConnectionAbortedError("Need more bytes, but we reached eof")
         if new_bytes:
             self._data += new_bytes
         else:
-            raise ConnectionAbortedError("Need more bytes, but we reached eof")
+            raise ConnectionAbortedError("Need more bytes, but none were received")
 
     async def peek_at_most(self, count):
         if count == 0:
