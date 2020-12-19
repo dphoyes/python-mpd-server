@@ -38,8 +38,6 @@ from .logging import Logger
 logger = Logger(__name__)
 
 
-class CommandArgumentException(Exception):pass
-
 async def _await_if_awaitable(x):
     if inspect.iscoroutine(x):
         return await x
@@ -91,11 +89,15 @@ class CommandListBase(HandlerBase):
 
 class CommandListDefault(CommandListBase):
     async def run(self):
-        for command in self.commands:
-            async for chunk in command.run():
-                yield chunk
-            if self.list_ok:
-                yield b"list_OK\n"
+        for command_listNum, command in enumerate(self.commands):
+            try:
+                async for chunk in command.run():
+                    yield chunk
+                if self.list_ok:
+                    yield b"list_OK\n"
+            except errors.MpdCommandError as e:
+                e.command_listNum += command_listNum
+                raise
 
 
 class CommandBase(HandlerBase):
@@ -141,7 +143,7 @@ class CommandBase(HandlerBase):
                 d[key].append(args[i+1])
             return d
         if len(args) > len(self.formatArg):
-            raise CommandArgumentException("Too much arguments: %s command arguments should be %s instead of %s" % (self.__class__,self.formatArg,args))
+            raise errors.InvalidArguments("Too many arguments: %s command arguments should be %s instead of %s" % (self.__class__,self.formatArg,args))
         try:
             d=dict()
             for i in range(0,len(self.formatArg)):
@@ -152,9 +154,9 @@ class CommandBase(HandlerBase):
                 else:
                     d.update({self.formatArg[i][0] : self.formatArg[i][1](args[i])})
         except IndexError :
-            raise CommandArgumentException("Not enough arguments: %s command arguments should be %s instead of %s" %(self.__class__,self.formatArg,args))
+            raise errors.InvalidArguments("Not enough arguments: %s command arguments should be %s instead of %s" %(self.__class__,self.formatArg,args))
         except ValueError as e:
-            raise CommandArgumentException("Wrong argument type: %s command arguments should be %s instead of %s (%s)" %(self.__class__,self.formatArg,args,e))
+            raise errors.InvalidArguments("Wrong argument type: %s command arguments should be %s instead of %s (%s)" %(self.__class__,self.formatArg,args,e))
         return d
 
 
@@ -192,7 +194,13 @@ class Command(CommandBase):
                     x = x.encode('utf-8')
                 yield x
         except NotImplementedError as e:
-            raise errors.CommandNotImplemented(self.__class__,str(e))
+            new_e = errors.CommandNotImplemented(explanation=str(e))
+            new_e.set_current_command(self.GetCommandName())
+            raise new_e from e
+        except errors.MpdCommandError as e:
+            e.set_current_command(self.GetCommandName())
+            e.command_listNum *= 0
+            raise
 
     def handle_args(self,**kwargs):
         """ Override this method to treat commands arguments."""

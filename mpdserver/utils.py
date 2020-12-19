@@ -100,11 +100,7 @@ class StreamBuffer:
                     yield self._data[0:match.start()]
                     del self._data[:match.start()]
                     out = await self.extract_until(b"\n")
-                    parsed = re.match(r"ACK \[[^\[\]]+\] {([^{}]+)}(.*)", out.decode('utf-8'))
-                    if parsed:
-                        raise errors.MpdCommandError(command=parsed.group(1), msg=parsed.group(2))
-                    else:
-                        raise errors.MpdCommandError(command="?", msg="Received unparseable error from other MPD server")
+                    raise errors.parse_ack_line(out.decode('utf-8'))
                 elif binary:
                     yield self._data[0:match.end()]
                     del self._data[:match.end()]

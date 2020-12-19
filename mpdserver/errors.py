@@ -1,38 +1,120 @@
+import enum
+import re
+
+
+class Ack(enum.IntEnum):
+    ERROR_NOT_LIST = 1
+    ERROR_ARG = 2
+    ERROR_PASSWORD = 3
+    ERROR_PERMISSION = 4
+    ERROR_UNKNOWN = 5
+
+    ERROR_NO_EXIST = 50
+    ERROR_PLAYLIST_MAX = 51
+    ERROR_SYSTEM = 52
+    ERROR_PLAYLIST_LOAD = 53
+    ERROR_UPDATE_ALREADY = 54
+    ERROR_PLAYER_SYNC = 55
+    ERROR_EXIST = 56
+
+
 ##################################
 ### Mpd supported return types ###
 ##################################
-class MpdErrorMsgFormat(Exception):pass
 class MpdCommandError(Exception):
-    def __init__(self,msg="Unknown error",command="command is not specified"):
-        self.command=command
-        self.msg=msg
+    error = Ack.ERROR_UNKNOWN
+    command_listNum = 0
+    current_command = None
+    message_text = "This error has no message"
+
+    def set_current_command(self, current_command):
+        self.current_command = current_command
+
     def toMpdMsg(self):
-        return "ACK [error@command_listNum] {%s} %s\n" % (self.command,self.msg)
+        return f"ACK [{self.error}@{self.command_listNum}] {{{self.current_command}}} {self.message_text}\n"
+
+
+class MpdCommandErrorCustom(MpdCommandError):
+    def __init__(self, message_text="Unknown error", error=Ack.ERROR_UNKNOWN):
+        self.message_text = message_text
+        self.error = error
+
+
 class CommandNotSupported(MpdCommandError):
-    def __init__(self,commandName):
-        self.commandName=commandName
-    def toMpdMsg(self):
-        return "ACK [error@command_listNum] {%s} Command '%s' not supported\n" % (self.commandName,self.commandName)
+    error = Ack.ERROR_UNKNOWN
+    message_text = "Command not supported"
+
+
 class CommandNotMPDCommand(MpdCommandError):
-    def __init__(self,commandName):
-        self.commandName=commandName
-    def toMpdMsg(self):
-        return "ACK [error@command_listNum] {%s} Command '%s' is not a MPD command\n" % (self.commandName,self.commandName)
+    message_text = "Not an MPD command"
+    error = Ack.ERROR_UNKNOWN
+
+
 class CommandNotImplemented(MpdCommandError):
-    def __init__(self,commandName,message=""):
-        self.commandName=commandName
-        self.message=message
-    def toMpdMsg(self):
-        return "ACK [error@command_listNum] {%s} Command '%s' is not implemented (%s)\n" % (self.commandName,self.commandName,self.message)
+    error = Ack.ERROR_UNKNOWN
+
+    def __init__(self, explanation=None):
+        self.explanation = explanation
+
+    @property
+    def message_text(self):
+        msg = "Command not implemented"
+        if self.explanation:
+            msg = f"{msg} ({self.explanation})"
+        return msg
+
+
+class InvalidArguments(MpdCommandError):
+    error = Ack.ERROR_ARG
+
+    def __init__(self, message_text="Invalid arguments"):
+        self.message_text = message_text
+
+
+class InvalidArgumentValue(MpdCommandError):
+    error = Ack.ERROR_ARG
+
+    def __init__(self, explanation, value):
+        self.explanation = explanation
+        self.value = value
+
+    @property
+    def message_text(self):
+        return f"{self.explanation}: {self.value}"
+
+
 class UserNotAllowed(MpdCommandError):
-    def __init__(self,commandName,userName):
-        self.commandName=commandName
-        self.userName=userName
-    def toMpdMsg(self):
-        return "ACK [error@command_listNum] {%s} User '%s' is not allowed to execute command %s\n" % (self.commandName,self.userName,self.commandName)
+    error = Ack.ERROR_PERMISSION
+
+    def __init__(self, userName):
+        self.userName = userName
+
+    @property
+    def message_text(self):
+        return f"User '{self.userName}' is not allowed to execute this command"
+
+
 class PasswordError(MpdCommandError):
-    def __init__(self,pwd,format):
-        self.pwd=pwd
-        self.format=format
-    def toMpdMsg(self):
-        return "ACK [error@command_listNum] {password} Password '%s' is not allowed a valid password. You should use a password such as '%s'\n" % (self.pwd,self.format)
+    error = Ack.ERROR_PASSWORD
+
+    def __init__(self, pwd, format):
+        self.pwd = pwd
+        self.format = format
+
+    @property
+    def message_text(self):
+        return f"Password '{self.pwd}' is not a valid password. You should use a password such as '{self.format}'"
+
+
+def parse_ack_line(ack, _RE = re.compile(r"ACK \[(\d+)@(\d+)\] {([^{}]+)} *(.*)")):
+    parsed = _RE.match(ack)
+    if parsed:
+        error, command_listNum, current_command, message_text = parsed.groups()
+        error = int(error)
+        command_listNum = int(command_listNum)
+        exc = MpdCommandErrorCustom(message_text=message_text, error=error)
+        exc.command_listNum += command_listNum
+        exc.set_current_command(current_command)
+        return exc
+    else:
+        return MpdCommandErrorCustom("Received unparseable error from other MPD server")

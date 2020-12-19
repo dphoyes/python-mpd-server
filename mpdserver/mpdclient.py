@@ -1,7 +1,7 @@
 import anyio
 import re
 
-from .errors import MpdCommandError
+from .errors import MpdCommandError, parse_ack_line
 from .utils import WithDaemonTasks, StreamBuffer
 from .logging import Logger
 
@@ -157,11 +157,7 @@ class MpdClient(WithDaemonTasks):
             if line == b"OK\n":
                 return
             if line.startswith(b"ACK "):
-                parsed = re.match(r"ACK \[[^\[\]]+\] {([^{}]+)}(.*)", line.decode('utf-8'))
-                if parsed:
-                    raise MpdCommandError(command=parsed.group(1), msg=parsed.group(2))
-                else:
-                    raise MpdCommandError(command="?", msg="Received unparseable error from other MPD server")
+                raise parse_ack_line(line.decode('utf-8'))
             yield line
 
     async def idle(self, *subsystems, initial_trigger=False, split=True):

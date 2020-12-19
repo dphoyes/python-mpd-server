@@ -103,7 +103,7 @@ class IdleState(object):
             try:
                 events_to_watch = [self.events[s] for s in subsystems]
             except KeyError as e:
-                raise MpdCommandError(command="idle", msg="Invalid subsystem '{}'".format(e.args[0]))
+                raise InvalidArgumentValue("Unrecognized idle event", e.args[0])
         else:
             events_to_watch = self.events.values()
 
@@ -136,7 +136,7 @@ class IdleState(object):
             async def wait_for_noidle():
                 line = await client_stream.extract_until(b"\n")
                 if line != b"noidle\n":
-                    raise MpdCommandError(command=line, msg="The only valid command in idle state is noidle")
+                    raise MpdCommandErrorCustom("The only valid command in idle state is noidle")
                 logger.debug("Received noidle")
                 await tg.cancel_scope.cancel()
             await tg.spawn(wait_for_noidle)
@@ -278,24 +278,29 @@ class MpdClientHandlerBase(object):
             for cmd in cls.__SupportedCommands.values():
                 cmd['users'].append(u)
 
-    def _make_command_object(self, raw_line):
+    def _make_command_object(self, command_listNum, raw_line):
         """ To get a command class to execute on received command
         string. This method raise supported command errors."""
         commandName = raw_line.split(maxsplit=1)[0].decode('utf8')
-        if commandName not in self.__SupportedCommands:
-            logger.warning("Command '%s' is not a MPD command!" % commandName)
-            raise CommandNotMPDCommand(commandName)
-        elif self.__SupportedCommands[commandName]['class'] == None:
-            if self.__SupportedCommands[commandName]['neededBy'] != None:
-                logger.critical("Command '%s' is needed for client(s) %s" % (commandName," ".join(self.__SupportedCommands[commandName]['neededBy'])))
-            logger.warning("Command '%s' is not supported!" % commandName)
-            raise CommandNotSupported(commandName)
-        elif not (Frontend.GetDefaultUsername() in self.__SupportedCommands[commandName]['users']
-                  or self.frontend.getUsername() in self.__SupportedCommands[commandName]['users']):
-            raise UserNotAllowed(commandName,self.frontend.getUsername())
-        else :
-            cls = self.__SupportedCommands[commandName]['class']
-            return cls(raw_line, client=self)
+        try:
+            if commandName not in self.__SupportedCommands:
+                logger.warning("Command '%s' is not a MPD command!" % commandName)
+                raise CommandNotMPDCommand()
+            elif self.__SupportedCommands[commandName]['class'] == None:
+                if self.__SupportedCommands[commandName]['neededBy'] != None:
+                    logger.critical("Command '%s' is needed for client(s) %s" % (commandName," ".join(self.__SupportedCommands[commandName]['neededBy'])))
+                logger.warning("Command '%s' is not supported!" % commandName)
+                raise CommandNotSupported()
+            elif not (Frontend.GetDefaultUsername() in self.__SupportedCommands[commandName]['users']
+                      or self.frontend.getUsername() in self.__SupportedCommands[commandName]['users']):
+                raise UserNotAllowed(self.frontend.getUsername())
+            else :
+                cls = self.__SupportedCommands[commandName]['class']
+                return cls(raw_line, client=self)
+        except MpdCommandError as e:
+            e.set_current_command(commandName)
+            e.command_listNum += command_listNum
+            raise
 
     @classmethod
     def define_commands(cls, register):
@@ -343,28 +348,36 @@ class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
                 cmdlist_match = re_command_list_begin.match(raw_line)
                 if cmdlist_match is None:
                     list_ok = False
-                    cmds = [self._make_command_object(raw_line)]
+                    cmds = [self._make_command_object(0, raw_line)]
                 else:
                     list_ok = cmdlist_match.group(1) is not None
                     async with anyio.fail_after(20):
                         rest = await self.stream.extract_until(b"command_list_end\n")
                     lines = re_line.findall(rest)
                     del lines[-1]
-                    cmds = [self._make_command_object(raw_line) for raw_line in lines]
+                    cmds = [self._make_command_object(n, raw_line) for n, raw_line in enumerate(lines)]
+            except MpdCommandError as e:
+                logger.info("Command Error: {}", e.toMpdMsg())
+                await self.stream.send_all(e.toMpdMsg().encode('utf-8'))
+                continue
             except TimeoutError:
                 logger.debug("Client connection timed out")
                 return
 
+            logger.info("Received MPD commands: {}", [c.raw_command for c in cmds])
+            command_listNum = 0
             try:
-                logger.info("Received MPD commands: {}", [c.raw_command for c in cmds])
                 for list_handler_cls, group in itertools.groupby(cmds, key=cmdlist_handler_getter):
                     group = list(group)
-                    if len(group) <= 1:
+                    len_group = len(group)
+                    if len_group <= 1:
                         list_handler_cls = CommandListDefault
                     async for chunk in list_handler_cls(group, list_ok=list_ok, client=self).run():
                         await self.stream.send_all(chunk)
+                    command_listNum += len_group
             except MpdCommandError as e:
-                logger.info("Command Error: %s"%e.toMpdMsg())
+                e.command_listNum += command_listNum
+                logger.info("Command Error: {}", e.toMpdMsg())
                 await self.stream.send_all(e.toMpdMsg().encode('utf-8'))
             else:
                 if any(c.respond for c in cmds):
