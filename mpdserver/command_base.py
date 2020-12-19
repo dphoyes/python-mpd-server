@@ -104,12 +104,12 @@ class CommandBase(HandlerBase):
     respond = True
     CommandListHandler = CommandListDefault
 
-    formatArg=()
+    formatArg={}
     varArg=False
     listArg=False
     """ To specify command arguments format. For example, ::
 
-       formatArg=[("song",OptStr)]
+       formatArg={"song": OptStr}
 
     means command accept a optionnal
     string argument bound to `song` attribute name."""
@@ -145,14 +145,13 @@ class CommandBase(HandlerBase):
         if len(args) > len(self.formatArg):
             raise errors.InvalidArguments("Too many arguments: %s command arguments should be %s instead of %s" % (self.__class__,self.formatArg,args))
         try:
-            d=dict()
-            for i in range(0,len(self.formatArg)):
-                if Opt in self.formatArg[i][1].__bases__ :
-                    try:
-                        d.update({self.formatArg[i][0] : self.formatArg[i][1](args[i])})
-                    except IndexError : pass
-                else:
-                    d.update({self.formatArg[i][0] : self.formatArg[i][1](args[i])})
+            d = dict()
+            for i, (arg_name, arg_type) in enumerate(self.formatArg.items()):
+                try:
+                    d.update({arg_name: arg_type(args[i])})
+                except IndexError:
+                    if Opt not in arg_type.__bases__:
+                        raise
         except IndexError :
             raise errors.InvalidArguments("Not enough arguments: %s command arguments should be %s instead of %s" %(self.__class__,self.formatArg,args))
         except ValueError as e:

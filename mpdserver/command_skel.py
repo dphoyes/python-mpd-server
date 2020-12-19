@@ -5,16 +5,16 @@ from .command_base import *
 # Default Commands Definitions #
 ################################
 class Random(Command):
-    formatArg=[('state',int)]
+    formatArg = {'state': int}
 
 class PlayId(Command):
-    formatArg=[('songId',OptInt)]
+    formatArg = {'songId': OptInt}
 class Play(Command):
-    formatArg=[('songPos',OptInt)]
+    formatArg = {'songPos': OptInt}
 
 class Pause(Command):
     """ Override :func:`handle_pause` and :func:`handle_unpause` method """
-    formatArg=[('state',int)]
+    formatArg = {'state': int}
     def handle_args(self,state):
         if state==1:
             self.handle_pause()
@@ -29,7 +29,7 @@ class Pause(Command):
 
 class Seek(Command):
     """Skip to a specified point toSec in a song songPosition on the playlist"""
-    formatArg=[('songPosition',int),('toSec',int)]
+    formatArg = {'songPosition': int, 'toSec': int}
 
 class Idle(CommandItems):
     listArg = True
@@ -106,25 +106,25 @@ class NotCommands(CommandItems): pass# Not used by gmpc
 class Commands(CommandItems): pass# Not used by gmpc
 
 class LsInfo(CommandItems): # Since 0.12
-    formatArg=[('directory',OptStr)]
+    formatArg = {'directory': OptStr}
 
 class MoveId(Command): # Since 0.12
-    formatArg=[('idFrom',int),('positionTo',int)]
+    formatArg = {'idFrom': int, 'positionTo': int}
     def handle_args(self,idFrom,positionTo):
         self.playlist.moveId(idFrom,positionTo)
 class Move(Command): # Since 0.12
     """ To move a song at positionFrom to postionTo."""
-    formatArg=[('positionFrom',int),('positionTo',int)]
+    formatArg = {'positionFrom': int, 'positionTo': int}
     def handle_args(self,positionFrom,positionTo):
         self.playlist.move(positionFrom,positionTo)
 
 class Delete(Command): # Since 0.12
     """ To delete the song at songPosition from current playlist. """
-    formatArg=[('songPosition',int)]
+    formatArg = {'songPosition': int}
     def handle_args(self,songPosition):
         self.playlist.delete(songPosition)
 class DeleteId(Command): # Since 0.12
-    formatArg=[('songId',int)]
+    formatArg = {'songId': int}
     def handle_args(self,songId):
         self.playlist.deleteId(songId)
 
@@ -132,17 +132,17 @@ class DeleteId(Command): # Since 0.12
 
 class ListPlaylistInfo(CommandSongs): # Since 0.12
     """ List playlist 'playlistname' content """
-    formatArg=[('playlistName',str)]
+    formatArg = {'playlistName': str}
 
 class Add(Command): # todo return type
-    formatArg=[('song',str)]
+    formatArg = {'song': str}
 
 class TagTypes(Command):pass # Since 0.12
 
 class PlaylistInfo(CommandSongs):
     """ Without song position, list all song in current playlist. With
     song position argument, get song details. """
-    formatArg=[('songPosition',OptInt)]
+    formatArg = {'songPosition': OptInt}
     def songs(self):
         try :
             pos=self.args['songPosition']
@@ -155,7 +155,7 @@ class PlaylistInfo(CommandSongs):
 class PlaylistId(CommandSongs):
     """ Without song position, list all song in current playlist. With
     song position argument, get song details. """
-    formatArg=[('songId',OptInt)]
+    formatArg = {'songId': OptInt}
     def handle_args(self,songId=0):pass
     def songs(self):
         try :
@@ -166,15 +166,15 @@ class PlaylistId(CommandSongs):
 
 
 class SetVol(Command):
-    formatArg=[('volume',int)]
+    formatArg = {'volume': int}
 
 class PlChanges(CommandSongs):
-    formatArg=[('playlistVersion',int)]
+    formatArg = {'playlistVersion': int}
     def songs(self):
         return self.playlist.generateMpdPlaylistDiff(self.args['playlistVersion'])
 
 class PlChangesPosId(CommandItems):
-    formatArg=[('playlistVersion',int)]
+    formatArg = {'playlistVersion': int}
     def items(self):
         p=self.playlist.generateMpdPlaylistDiff(self.args['playlistVersion'])
         acc=[]
@@ -185,7 +185,7 @@ class PlChangesPosId(CommandItems):
 
 class Password(Command):
     """ Set username of connexion."""
-    formatArg=[('pwd',str)]
+    formatArg = {'pwd': str}
     def handle_args(self,pwd):
         if not self.frontend.set(pwd):
             raise MpdCommandError("User '%s' doesn't exist"%pwd,"password")
@@ -201,9 +201,9 @@ class ListPlaylists(CommandItems):
 class Load(Command):
     """ Load a playlist in current playlist. Songs are added to
     current playlist."""
-    formatArg=[('playlistName',str)]
+    formatArg = {'playlistName': str}
 class Save(Command):
-    formatArg=[('playlistName',str)]
+    formatArg = {'playlistName': str}
 
 class Rm(Command):
-    formatArg=[('playlistName',str)]
+    formatArg = {'playlistName': str}
