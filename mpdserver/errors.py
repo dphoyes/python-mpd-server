@@ -33,6 +33,9 @@ class MpdCommandError(Exception):
     def toMpdMsg(self):
         return f"ACK [{self.error}@{self.command_listNum}] {{{self.current_command}}} {self.message_text}\n"
 
+    def __str__(self):
+        return self.toMpdMsg()
+
 
 class MpdCommandErrorCustom(MpdCommandError):
     def __init__(self, message_text="Unknown error", error=Ack.ERROR_UNKNOWN):
