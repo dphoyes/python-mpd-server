@@ -27,7 +27,7 @@ A client connection can begin by a password command. In this case, a
 :class:`Frontend` is created by client password command. This object
 is provided to commands treated during this session.
 """
-from __future__ import absolute_import
+from __future__ import absolute_import, annotations
 
 import anyio
 import threading
@@ -92,11 +92,11 @@ class IdleState(object):
     )
 
     def __init__(self):
-        self.events = {s: anyio.create_event() for s in self.SUBSYSTEM_NAMES}
+        self.events = {s: anyio.Event() for s in self.SUBSYSTEM_NAMES}
 
-    async def notify(self, subsystem):
+    def notify(self, subsystem):
         logger.debug("Idle notify: {}", subsystem)
-        await self.events[subsystem].set()
+        self.events[subsystem].set()
 
     async def wait(self, subsystems=()):
         if subsystems:
@@ -111,16 +111,16 @@ class IdleState(object):
         async with anyio.create_task_group() as tg:
             async def wait_for(e):
                 await e.wait()
-                await tg.cancel_scope.cancel()
+                tg.cancel_scope.cancel()
             for e in events_to_watch:
-                await tg.spawn(wait_for, e)
+                tg.start_soon(wait_for, e)
         logger.debug("Coming out of idle")
 
         changed_subsystems = []
         for name, event in self.events.items():
             if event.is_set():
                 changed_subsystems.append(name)
-                self.events[name] = anyio.create_event()
+                self.events[name] = anyio.Event()
         logger.debug("Changed subsystems: {}", changed_subsystems)
         return changed_subsystems
 
@@ -130,16 +130,16 @@ class IdleState(object):
         async with anyio.create_task_group() as tg:
             async def wait_for_change():
                 changed_subsystems[:] = await self.wait(subsystems)
-                await tg.cancel_scope.cancel()
-            await tg.spawn(wait_for_change)
+                tg.cancel_scope.cancel()
+            tg.start_soon(wait_for_change)
 
             async def wait_for_noidle():
                 line = await client_stream.extract_until(b"\n")
                 if line != b"noidle\n":
                     raise MpdCommandErrorCustom("The only valid command in idle state is noidle")
                 logger.debug("Received noidle")
-                await tg.cancel_scope.cancel()
-            await tg.spawn(wait_for_noidle)
+                tg.cancel_scope.cancel()
+            tg.start_soon(wait_for_noidle)
 
         return changed_subsystems
 
@@ -343,7 +343,7 @@ class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
 
         while True:
             try:
-                async with anyio.fail_after(10):
+                with anyio.fail_after(10):
                     raw_line = await self.stream.extract_until(b"\n")
                 cmdlist_match = re_command_list_begin.match(raw_line)
                 if cmdlist_match is None:
@@ -351,7 +351,7 @@ class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
                     cmds = [self._make_command_object(0, raw_line)]
                 else:
                     list_ok = cmdlist_match.group(1) is not None
-                    async with anyio.fail_after(20):
+                    with anyio.fail_after(20):
                         rest = await self.stream.extract_until(b"command_list_end\n")
                     lines = re_line.findall(rest)
                     del lines[-1]
@@ -416,6 +416,6 @@ class MpdServer(object):
         listener = await anyio.create_tcp_listener(local_port=self.port)
         await listener.serve(handle_client)
 
-    async def notify_idle(self, subsystem):
+    def notify_idle(self, subsystem):
         for c in self.clients:
-            await c.idle.notify(subsystem)
+            c.idle.notify(subsystem)

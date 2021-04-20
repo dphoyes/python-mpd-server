@@ -72,11 +72,11 @@ class MpdClient(WithDaemonTasks):
         self.command_queue = anyio.streams.stapled.StapledObjectStream(
             *anyio.create_memory_object_stream(1, item_type=CommandQueueItem)
         )
-        self.wake = anyio.create_event()
+        self.wake = anyio.Event()
         self.idle_consumers = set()
 
-    async def _spawn_daemon_tasks(self, tasks):
-        await tasks.spawn(self._run)
+    def _spawn_daemon_tasks(self, tasks):
+        tasks.start_soon(self._run)
 
     def _connect(self):
         if self.host.startswith('/'):
@@ -108,7 +108,7 @@ class MpdClient(WithDaemonTasks):
 
             while True:
                 cmd = None
-                async with anyio.move_on_after(0.1):
+                with anyio.move_on_after(0.1):
                     cmd = await self.command_queue.receive()
                 if cmd is not None:
                     logger.debug("Writing command: {}", cmd.command)
@@ -132,22 +132,22 @@ class MpdClient(WithDaemonTasks):
                         subsystems = ()
                     else:
                         subsystems = {s for c in self.idle_consumers for s in c.subsystems}
-                    self.wake = anyio.create_event()
+                    self.wake = anyio.Event()
                     logger.debug("Entering idle: {}", subsystems)
                     await stream.send_all("idle {}\n".format(' '.join(subsystems)).encode('utf-8'))
                     async with anyio.create_task_group() as tasks:
                         async def handle_wake_from_idle():
                             await self.wake.wait()
                             await stream.send_all(b"noidle\n")
-                        await tasks.spawn(handle_wake_from_idle)
+                        tasks.start_soon(handle_wake_from_idle)
                         changed = [s async for s in parse_list(self._iter_response(stream), b"changed")]
                         if changed:
                             for c in self.idle_consumers:
                                 changed_for_consumer = [s for s in changed if s in c.subsystems] if c.subsystems else changed
                                 if changed_for_consumer:
                                     await c.result_q.send(changed_for_consumer)
-                        await tasks.cancel_scope.cancel()
-                    await self.wake.set()
+                        tasks.cancel_scope.cancel()
+                    self.wake.set()
 
     @staticmethod
     async def _iter_response(stream):
@@ -170,7 +170,7 @@ class MpdClient(WithDaemonTasks):
         consumer = IdleConsumer(frozenset(subsystems))
         try:
             self.idle_consumers.add(consumer)
-            await self.wake.set()
+            self.wake.set()
             while True:
                 changed = await consumer.result_q.receive()
                 logger.debug("Idle got {}", changed)
@@ -186,7 +186,7 @@ class MpdClient(WithDaemonTasks):
         item = CommandQueueItem(line, forwarding_mode)
         logger.debug("Sending command to queue: {}", line)
         await self.command_queue.send(item)
-        await self.wake.set()
+        self.wake.set()
         while True:
             result = await item.result_q.receive()
             if result is None:
