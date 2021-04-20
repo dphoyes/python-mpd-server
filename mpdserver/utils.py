@@ -1,7 +1,27 @@
 import re
 import anyio.abc
 import contextlib
+import inspect
 from . import errors
+
+
+async def _await_if_awaitable(x):
+    if inspect.iscoroutine(x):
+        return await x
+    else:
+        return x
+
+
+async def _async_yield_from_if_generator(arg, default):
+    if inspect.isasyncgen(arg):
+        async for value in arg:
+            yield value
+    elif inspect.isgenerator(arg):
+        for value in arg:
+            yield value
+    else:
+        for value in default:
+            yield value
 
 
 class WithAsyncExitStack(object):
