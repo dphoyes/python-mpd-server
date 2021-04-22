@@ -339,7 +339,7 @@ class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
         if self.partition is None:
             self.partition = self.server.partitions["default"]
 
-        await self.stream.send_all("OK MPD 0.21.11\n".encode('utf-8'))
+        await self.stream.send_all("OK MPD 0.22.0\n".encode('utf-8'))
 
         re_command_list_begin = re.compile(b"^command_list_(ok_)?begin\n$")
         re_line = re.compile(b"[^\n]+\n")
