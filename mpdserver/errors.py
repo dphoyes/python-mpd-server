@@ -109,7 +109,7 @@ class PasswordError(MpdCommandError):
         return f"Password '{self.pwd}' is not a valid password. You should use a password such as '{self.format}'"
 
 
-def parse_ack_line(ack, _RE = re.compile(r"ACK \[(\d+)@(\d+)\] {([^{}]+)} *(.*)")):
+def parse_ack_line(ack, _RE = re.compile(r"ACK \[(\d+)@(\d+)\] {([^{}]*)} *(.*)")):
     parsed = _RE.match(ack)
     if parsed:
         error, command_listNum, current_command, message_text = parsed.groups()
@@ -120,4 +120,4 @@ def parse_ack_line(ack, _RE = re.compile(r"ACK \[(\d+)@(\d+)\] {([^{}]+)} *(.*)"
         exc.set_current_command(current_command)
         return exc
     else:
-        return MpdCommandErrorCustom("Received unparseable error from other MPD server")
+        return MpdCommandErrorCustom(f"Received unparseable error from other MPD server: {ack}")
