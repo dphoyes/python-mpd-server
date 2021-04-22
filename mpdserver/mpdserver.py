@@ -41,7 +41,7 @@ import sys
 from .command_base import *
 from .command_skel import *
 from .errors import *
-from .utils import WithAsyncExitStack, WithDaemonTasks, StreamBuffer
+from .utils import WithAsyncExitStack, StreamBuffer, _await_if_awaitable
 from .logging import Logger
 
 logger = Logger(__name__)
@@ -330,11 +330,15 @@ class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
         self.server = server
         self.frontend = Frontend()
         self.idle = IdleState()
+        self.partition = None
         logger.debug( "Client connected (%s)" % threading.currentThread().getName())
 
     async def run(self):
         """Handle connection with mpd client. It gets client command,
         execute it and send a respond."""
+        if self.partition is None:
+            self.partition = self.server.partitions["default"]
+
         await self.stream.send_all("OK MPD 0.21.11\n".encode('utf-8'))
 
         re_command_list_begin = re.compile(b"^command_list_(ok_)?begin\n$")
@@ -385,25 +389,133 @@ class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
                     await self.stream.send_all(b"OK\n")
 
 
+class MpdPartition(object):
+    name: str
+    server: MpdServer
+
+    def __init__(self, name: str, server: MpdServer):
+        super().__init__()
+        self.name = name
+        self.server = server
+        self.playlist = server.Playlist()
+        self.__delete_lock = anyio.Lock()
+        self.__delete_request = anyio.Event()
+        self.__delete_status_sender = None
+
+    @property
+    def clients(self):
+        return {c for c in self.server.clients if c.partition is self}
+
+    async def run(self, *, task_status=anyio.TASK_STATUS_IGNORED):
+        task_status.started()
+        await self.__delete_request.wait()
+        self.__delete_request = anyio.Event()
+
+    async def _run_and_handle_deletion(self, *, task_status=anyio.TASK_STATUS_IGNORED):
+        while True:
+            try:
+                await self.run(task_status=task_status)
+            except Exception as e:
+                if self.__delete_status_sender is None:
+                    raise
+                else:
+                    await self.__delete_status_sender.send(e)
+                    task_status = anyio.TASK_STATUS_IGNORED
+            else:
+                await self.__delete_status_sender.send(None)
+                return
+
+    async def _delete(self):
+        async with self.__delete_lock:
+            if self.__delete_status_sender is None:
+                self.__delete_status_sender, delete_status_receiver = anyio.create_memory_object_stream()
+                self.__delete_request.set()
+                result = await delete_status_receiver.receive()
+                if isinstance(result, Exception):
+                    self.__delete_status_sender = None
+                    raise result
+                assert result is None
+
+    def notify_idle(self, subsystem):
+        for c in self.clients:
+            c.idle.notify(subsystem)
+
+
+class MpdPartitionSet(WithAsyncExitStack):
+    def __init__(self, server, Partition):
+        super().__init__()
+        self.server = server
+        self.Partition = Partition
+        self.partitions = dict()
+        self.tasks = None
+        self.__lock = anyio.Lock()
+
+    async def _init_exit_stack(self, stack):
+        await super()._init_exit_stack(stack)
+        self.tasks = await stack.enter_async_context(anyio.create_task_group())
+        stack.callback(self.tasks.cancel_scope.cancel)
+
+    def __len__(self):
+        return len(self.partitions)
+
+    def __iter__(self):
+        return iter(self.partitions.values())
+
+    def __getitem__(self, name):
+        return self.partitions[name]
+
+    async def new(self, name):
+        async with self.__lock:
+            if name in self.partitions:
+                raise KeyError("Partition with that name already exists")
+            p = self.Partition(name=name, server=self.server)
+            await self.tasks.start(p._run_and_handle_deletion)
+            self.partitions[name] = p
+            self.server.notify_idle("partition")
+            return p
+
+    async def delete(self, name):
+        async with self.__lock:
+            p = self.partitions[name]
+            del self.partitions[name]
+            self.server.notify_idle("partition")
+            try:
+                await p._delete()
+            except Exception:
+                self.partitions[name] = p
+                self.server.notify_idle("partition")
+                raise
+
+
 class MpdServer(object):
     """ Create a MPD server. By default, a request is treated via
     :class:`MpdClientHandler` class but you can specify an alternative
     request class with ClientHandler argument."""
 
-    def __init__(self, port=6600, ClientHandler=MpdClientHandler, Playlist=MpdPlaylist):
-        self.host, self.port = "", port
+    def __init__(self, ClientHandler=MpdClientHandler, Playlist=MpdPlaylist, Partition=MpdPartition):
         self.ClientHandler = ClientHandler
+        self.Playlist = Playlist
+        self.partitions = MpdPartitionSet(server=self, Partition=Partition)
         self.clients = set()
-        self.playlist = Playlist()
 
     async def run(self):
         """Run MPD server in a coroutine"""
-        logger.info("Mpd Server is listening on port " + str(self.port))
+        async with self.partitions:
+            await self.init_partitions()
+            await self.run_all_listeners()
 
+    async def init_partitions(self):
+        await self.partitions.new("default")
+
+    async def run_all_listeners(self, host=None, port=6600):
+        logger.info("Mpd Server is listening on port " + str(port))
+        await self.run_listener(anyio.create_tcp_listener(local_host=host, local_port=port))
+
+    async def run_listener(self, listener, **client_kwargs):
         async def handle_client(client):
             try:
                 async with client:
-                    async with self.ClientHandler(client, self) as handler:
+                    async with self.ClientHandler(client, self, **client_kwargs) as handler:
                         self.clients.add(handler)
                         try:
                             await handler.run()
@@ -412,8 +524,7 @@ class MpdServer(object):
                             logger.debug("Client connection closed")
             except ConnectionError:
                 pass
-
-        listener = await anyio.create_tcp_listener(local_port=self.port)
+        listener = await _await_if_awaitable(listener)
         await listener.serve(handle_client)
 
     def notify_idle(self, subsystem):

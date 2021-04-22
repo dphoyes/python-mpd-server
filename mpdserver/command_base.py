@@ -51,11 +51,12 @@ class HandlerBase(object):
         return self.client.server
 
     @property
-    def playlist(self):
-        return self.server.playlist
+    def partition(self):
+        return self.client.partition
 
-    def notify_idle(self, subsystem):
-        return self.server.notify_idle(subsystem)
+    @property
+    def playlist(self):
+        return self.partition.playlist
 
 
 class CommandListBase(HandlerBase):
