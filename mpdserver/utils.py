@@ -49,9 +49,9 @@ class WithDaemonTasks(WithAsyncExitStack):
         await super()._init_exit_stack(stack)
         tasks = await stack.enter_async_context(anyio.create_task_group())
         stack.callback(tasks.cancel_scope.cancel)
-        self._spawn_daemon_tasks(tasks)
+        await self._start_daemon_tasks(tasks)
 
-    def _spawn_daemon_tasks(self, tasks):
+    async def _start_daemon_tasks(self, tasks):
         pass
 
 

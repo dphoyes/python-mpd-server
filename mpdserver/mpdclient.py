@@ -1,11 +1,20 @@
 import anyio
 import re
 
-from .errors import MpdCommandError, parse_ack_line
+from .errors import Ack, MpdCommandError, parse_ack_line
 from .utils import WithDaemonTasks, StreamBuffer
 from .logging import Logger
 
 logger = Logger(__name__)
+
+
+def quote(text):
+    if isinstance(text, str):
+        return "".join(('"', text.replace("\\", "\\\\").replace('"', '\\"'), '"'))
+    elif isinstance(text, bytes):
+        return b"".join((b'"', text.replace(b"\\", b"\\\\").replace(b'"', b'\\"'), b'"'))
+    else:
+        raise TypeError
 
 
 class IdleConsumer:
@@ -75,8 +84,8 @@ class MpdClient(WithDaemonTasks):
         self.wake = anyio.Event()
         self.idle_consumers = set()
 
-    def _spawn_daemon_tasks(self, tasks):
-        tasks.start_soon(self._run)
+    async def _start_daemon_tasks(self, tasks):
+        await tasks.start(self._run)
 
     def _connect(self):
         if self.host.startswith('/'):
@@ -84,7 +93,7 @@ class MpdClient(WithDaemonTasks):
         else:
             return anyio.connect_tcp(self.host, self.port)
 
-    async def _run(self):
+    async def _run(self, *, task_status=anyio.TASK_STATUS_IGNORED):
         async with await self._connect() as stream:
             stream = StreamBuffer(stream)
             welcome = (await stream.extract_until(b'\n')).decode('utf-8').strip()
@@ -92,19 +101,26 @@ class MpdClient(WithDaemonTasks):
 
             if self.default_partition is not None:
                 for _ in range(3):
-                    await stream.send_all(f"partition {self.default_partition}\n".encode('utf8'))
+                    await stream.send_all(f"partition {quote(self.default_partition)}\n".encode('utf8'))
                     try:
                         async for line in self._iter_response(stream):
                             raise RuntimeError("Unexpected response")
                         logger.debug("Switched to partition {}", self.default_partition)
                         break
-                    except MpdCommandError:
-                        pass
-                    await stream.send_all(f"newpartition {self.default_partition}\n".encode('utf8'))
-                    async for line in self._iter_response(stream):
-                        raise RuntimeError("Unexpected response")
+                    except MpdCommandError as e:
+                        if e.error != Ack.ERROR_NO_EXIST:
+                            raise
+                    await stream.send_all(f"newpartition {quote(self.default_partition)}\n".encode('utf8'))
+                    try:
+                        async for line in self._iter_response(stream):
+                            raise RuntimeError("Unexpected response")
+                    except MpdCommandError as e:
+                        if e.error != Ack.ERROR_EXIST:
+                            raise
                 else:
                     raise RuntimeError(f"Unable to change partition to {self.default_partition}")
+
+            task_status.started()
 
             while True:
                 cmd = None
@@ -212,6 +228,9 @@ class MpdClient(WithDaemonTasks):
         return await self.command_returning_list(b"listpartitions", b"partition")
 
     async def partition(self, name):
-        if isinstance(name, str):
-            name = name.encode("utf8")
-        return await self.command_returning_nothing(b"partition " + name)
+        assert isinstance(name, str)
+        return await self.command_returning_nothing(f"partition {quote(name)}".encode('utf8'))
+
+    async def delpartition(self, name):
+        assert isinstance(name, str)
+        return await self.command_returning_nothing(f"delpartition {quote(name)}".encode('utf8'))
