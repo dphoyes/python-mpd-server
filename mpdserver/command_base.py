@@ -34,6 +34,7 @@ import shlex
 from . import errors
 from .logging import Logger
 from .utils import _await_if_awaitable, _async_yield_from_if_generator
+import contextlib
 
 logger = Logger(__name__)
 
@@ -73,8 +74,9 @@ class CommandListDefault(CommandListBase):
     async def run(self):
         for command_listNum, command in enumerate(self.commands):
             try:
-                async for chunk in command.run():
-                    yield chunk
+                async with contextlib.aclosing(command.run()) as iter_chunks:
+                    async for chunk in iter_chunks:
+                        yield chunk
                 if self.list_ok:
                     yield b"list_OK\n"
             except errors.MpdCommandError as e:
@@ -170,10 +172,11 @@ class Command(CommandBase):
         try:
             await _await_if_awaitable(self.handle_args(**(self.args)))
             result = await _await_if_awaitable(self.toMpdMsg())
-            async for x in _async_yield_from_if_generator(result, (result,)):
-                if isinstance(x, str):
-                    x = x.encode('utf-8')
-                yield x
+            async with contextlib.aclosing(_async_yield_from_if_generator(result, (result,))) as iter_x:
+                async for x in iter_x:
+                    if isinstance(x, str):
+                        x = x.encode('utf-8')
+                    yield x
         except NotImplementedError as e:
             new_e = errors.CommandNotImplemented(explanation=str(e))
             new_e.set_current_command(self.GetCommandName())
@@ -207,8 +210,9 @@ class CommandItems(Command):
     async def toMpdMsg(self):
         to_bytes = lambda x: x if isinstance(x, bytes) else str(x).encode('utf8')
         items = await _await_if_awaitable(self.items())
-        async for i,v in _async_yield_from_if_generator(items, items):
-            yield b''.join(token for token in (to_bytes(i), b': ', to_bytes(v), b'\n'))
+        async with contextlib.aclosing(_async_yield_from_if_generator(items, items)) as iter_i_v:
+            async for i,v in iter_i_v:
+                yield b''.join(token for token in (to_bytes(i), b': ', to_bytes(v), b'\n'))
 
 class CommandSongs(Command):
     """ This is a subclass of :class:`Command` class. Respond songs

@@ -1,5 +1,6 @@
 import anyio
 import re
+import contextlib
 
 from .errors import Ack, MpdCommandError, parse_ack_line
 from .utils import WithDaemonTasks, StreamBuffer
@@ -30,33 +31,36 @@ class CommandQueueItem:
 
 
 async def parse_raw_key_value_pairs(response_lines):
-    async for line in response_lines:
-        k, v = line.split(b':', maxsplit=1)
-        yield bytes(k), bytes(v.strip())
+    async with contextlib.aclosing(response_lines):
+        async for line in response_lines:
+            k, v = line.split(b':', maxsplit=1)
+            yield bytes(k), bytes(v.strip())
 
 
 async def parse_raw_objects(response_lines, delimiter):
     if isinstance(delimiter, bytes):
         delimiter = delimiter,
     obj = {}
-    async for k, v in parse_raw_key_value_pairs(response_lines):
-        if k in delimiter:
-            if obj:
-                yield obj
-            obj = {k: v}
-        elif k in obj:
-            obj_k = obj[k]
-            if not isinstance(obj_k, list):
-                obj[k] = obj_k = [obj_k]
-            obj_k.append(v)
-        else:
-            obj[k] = v
+    async with contextlib.aclosing(parse_raw_key_value_pairs(response_lines)) as iter_k_v:
+        async for k, v in iter_k_v:
+            if k in delimiter:
+                if obj:
+                    yield obj
+                obj = {k: v}
+            elif k in obj:
+                obj_k = obj[k]
+                if not isinstance(obj_k, list):
+                    obj[k] = obj_k = [obj_k]
+                obj_k.append(v)
+            else:
+                obj[k] = v
     if obj:
         yield obj
 
 
 async def parse_raw_object(response_lines):
-    ret = [x async for x in parse_raw_objects(response_lines, delimiter=())]
+    async with contextlib.aclosing(parse_raw_objects(response_lines, delimiter=())) as iter_x:
+        ret = [x async for x in iter_x]
     len_ret = len(ret)
     if len_ret == 0:
         return {}
@@ -67,11 +71,12 @@ async def parse_raw_object(response_lines):
 
 
 async def parse_list(response_lines, key, ignore_other_keys=False):
-    async for k, v in parse_raw_key_value_pairs(response_lines):
-        if k == key:
-            yield v.decode('utf-8')
-        elif not ignore_other_keys:
-            raise AssertionError(f"Unexpected key: {k}")
+    async with contextlib.aclosing(parse_raw_key_value_pairs(response_lines)) as iter_k_v:
+        async for k, v in iter_k_v:
+            if k == key:
+                yield v.decode('utf-8')
+            elif not ignore_other_keys:
+                raise AssertionError(f"Unexpected key: {k}")
 
 
 class MpdClient(WithDaemonTasks):
@@ -103,8 +108,9 @@ class MpdClient(WithDaemonTasks):
                 for _ in range(3):
                     await stream.send_all(f"partition {quote(self.default_partition)}\n".encode('utf8'))
                     try:
-                        async for line in self._iter_response(stream):
-                            raise RuntimeError("Unexpected response")
+                        async with contextlib.aclosing(self._iter_response(stream)) as iter_lines:
+                            async for line in iter_lines:
+                                raise RuntimeError("Unexpected response")
                         logger.debug("Switched to partition {}", self.default_partition)
                         break
                     except MpdCommandError as e:
@@ -112,8 +118,9 @@ class MpdClient(WithDaemonTasks):
                             raise
                     await stream.send_all(f"newpartition {quote(self.default_partition)}\n".encode('utf8'))
                     try:
-                        async for line in self._iter_response(stream):
-                            raise RuntimeError("Unexpected response")
+                        async with contextlib.aclosing(self._iter_response(stream)) as iter_lines:
+                            async for line in iter_lines:
+                                raise RuntimeError("Unexpected response")
                     except MpdCommandError as e:
                         if e.error != Ack.ERROR_EXIST:
                             raise
@@ -133,11 +140,13 @@ class MpdClient(WithDaemonTasks):
                         await stream.send_all(b'\n')
                     try:
                         if cmd.forwarding_mode:
-                            async for chunk in stream.forward_mpd_response():
-                                await cmd.result_q.send(chunk)
+                            async with contextlib.aclosing(stream.forward_mpd_response()) as iter_chunks:
+                                async for chunk in iter_chunks:
+                                    await cmd.result_q.send(chunk)
                         else:
-                            async for line in self._iter_response(stream):
-                                await cmd.result_q.send(line)
+                            async with contextlib.aclosing(self._iter_response(stream)) as iter_lines:
+                                async for line in iter_lines:
+                                    await cmd.result_q.send(line)
                     except MpdCommandError as e:
                         await cmd.result_q.send(e)
                     await cmd.result_q.send(None)
@@ -156,7 +165,8 @@ class MpdClient(WithDaemonTasks):
                             await self.wake.wait()
                             await stream.send_all(b"noidle\n")
                         tasks.start_soon(handle_wake_from_idle)
-                        changed = [s async for s in parse_list(self._iter_response(stream), b"changed")]
+                        async with contextlib.aclosing(parse_list(self._iter_response(stream), b"changed")) as iter_s:
+                            changed = [s async for s in iter_s]
                         if changed:
                             for c in self.idle_consumers:
                                 changed_for_consumer = [s for s in changed if s in c.subsystems] if c.subsystems else changed
@@ -212,16 +222,19 @@ class MpdClient(WithDaemonTasks):
             yield result
 
     async def command_returning_list(self, cmd, key):
-        return [x async for x in parse_list(self.raw_command(cmd), key)]
+        async with contextlib.aclosing(parse_list(self.raw_command(cmd), key)) as iter_x:
+            return [x async for x in iter_x]
 
     async def command_returning_raw_objects(self, cmd, *args, **kwargs):
-        return [x async for x in parse_raw_objects(self.raw_command(cmd), *args, **kwargs)]
+        async with contextlib.aclosing(parse_raw_objects(self.raw_command(cmd), *args, **kwargs)) as iter_x:
+            return [x async for x in iter_x]
 
     async def command_returning_raw_object(self, cmd):
         return await parse_raw_object(self.raw_command(cmd))
 
     async def command_returning_nothing(self, cmd):
-        response = [x async for x in self.raw_command(cmd)]
+        async with contextlib.aclosing(self.raw_command(cmd)) as iter_x:
+            response = [x async for x in iter_x]
         assert len(response) == 0
 
     async def listpartitions(self):

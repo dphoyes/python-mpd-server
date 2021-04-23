@@ -34,6 +34,7 @@ import threading
 import operator
 import itertools
 import sys
+import contextlib
 #from pimp.core.playlist import *
 #from pimp.core.player import *
 #import pimp.core.db
@@ -376,8 +377,9 @@ class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
                     len_group = len(group)
                     if len_group <= 1:
                         list_handler_cls = CommandListDefault
-                    async for chunk in list_handler_cls(group, list_ok=list_ok, client=self).run():
-                        await self.stream.send_all(chunk)
+                    async with contextlib.aclosing(list_handler_cls(group, list_ok=list_ok, client=self).run()) as iter_chunks:
+                        async for chunk in iter_chunks:
+                            await self.stream.send_all(chunk)
                     command_listNum += len_group
             except MpdCommandError as e:
                 e.command_listNum += command_listNum

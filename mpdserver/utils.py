@@ -5,6 +5,18 @@ import inspect
 from . import errors
 
 
+if not hasattr(contextlib, "aclosing"):
+    class aclosing:
+        def __init__(self, thing):
+            self.thing = thing
+        async def __aenter__(self):
+            return self.thing
+        async def __aexit__(self, *exc_info):
+            await self.thing.aclose()
+    contextlib.aclosing = aclosing
+    del aclosing
+
+
 async def _await_if_awaitable(x):
     if inspect.iscoroutine(x):
         return await x
@@ -14,11 +26,13 @@ async def _await_if_awaitable(x):
 
 async def _async_yield_from_if_generator(arg, default):
     if inspect.isasyncgen(arg):
-        async for value in arg:
-            yield value
+        async with contextlib.aclosing(arg):
+            async for value in arg:
+                yield value
     elif inspect.isgenerator(arg):
-        for value in arg:
-            yield value
+        with contextlib.closing(arg):
+            for value in arg:
+                yield value
     else:
         for value in default:
             yield value
