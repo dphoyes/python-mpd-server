@@ -42,7 +42,7 @@ import contextlib
 from .command_base import *
 from .command_skel import *
 from .errors import *
-from .utils import WithAsyncExitStack, StreamBuffer, _await_if_awaitable
+from .utils import StreamBuffer, _await_if_awaitable
 from .logging import Logger
 
 logger = Logger(__name__)
@@ -443,7 +443,7 @@ class MpdPartition(object):
             c.idle.notify(subsystem)
 
 
-class MpdPartitionSet(WithAsyncExitStack):
+class MpdPartitionSet:
     def __init__(self, server, Partition):
         super().__init__()
         self.server = server
@@ -451,11 +451,19 @@ class MpdPartitionSet(WithAsyncExitStack):
         self.partitions = dict()
         self.tasks = None
         self.__lock = anyio.Lock()
+        self.__cm = self.__ContextManager()
 
-    async def _init_exit_stack(self, stack):
-        await super()._init_exit_stack(stack)
-        self.tasks = await stack.enter_async_context(anyio.create_task_group())
-        stack.callback(self.tasks.cancel_scope.cancel)
+    @contextlib.asynccontextmanager
+    async def __ContextManager(self):
+        async with anyio.create_task_group() as self.tasks:
+            yield self
+            tasks.cancel_scope.cancel()
+
+    async def __aenter__(self):
+        return await self.__cm.__aenter__()
+
+    async def __aexit__(self, *args):
+        return await self.__cm.__aexit__(*args)
 
     def __len__(self):
         return len(self.partitions)

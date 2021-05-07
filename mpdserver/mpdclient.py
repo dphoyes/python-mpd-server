@@ -3,7 +3,7 @@ import re
 import contextlib
 
 from .errors import Ack, MpdCommandError, parse_ack_line
-from .utils import WithDaemonTasks, StreamBuffer
+from .utils import StreamBuffer
 from .logging import Logger
 
 logger = Logger(__name__)
@@ -79,7 +79,7 @@ async def parse_list(response_lines, key, ignore_other_keys=False):
                 raise AssertionError(f"Unexpected key: {k}")
 
 
-class MpdClient(WithDaemonTasks):
+class MpdClient:
     def __init__(self, host, port=6600, default_partition=None):
         super().__init__()
         self.host, self.port, self.default_partition = host, port, default_partition
@@ -88,9 +88,25 @@ class MpdClient(WithDaemonTasks):
         )
         self.wake = anyio.Event()
         self.idle_consumers = set()
+        self.__cm = None
 
-    async def _start_daemon_tasks(self, tasks):
-        await tasks.start(self._run)
+    @contextlib.asynccontextmanager
+    async def __ContextManager(self):
+        async with anyio.create_task_group() as tasks:
+            await tasks.start(self._run)
+            yield self
+            tasks.cancel_scope.cancel()
+
+    async def __aenter__(self):
+        assert self.__cm is None
+        self.__cm = self.__ContextManager()
+        return await self.__cm.__aenter__()
+
+    async def __aexit__(self, *args):
+        try:
+            return await self.__cm.__aexit__(*args)
+        finally:
+            self.__cm = None
 
     def _connect(self):
         if self.host.startswith('/'):

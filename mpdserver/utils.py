@@ -38,37 +38,6 @@ async def _async_yield_from_if_generator(arg, default):
             yield value
 
 
-class WithAsyncExitStack(object):
-    def __init__(self):
-        super().__init__()
-        self.__exit_stack = contextlib.AsyncExitStack()
-
-    async def __aenter__(self):
-        await self.__exit_stack.__aenter__()
-        async with contextlib.AsyncExitStack() as stack:
-            stack.push_async_exit(self)
-            await self._init_exit_stack(self.__exit_stack)
-            stack.pop_all()
-        return self
-
-    async def __aexit__(self, *args):
-        await self.__exit_stack.__aexit__(*args)
-
-    async def _init_exit_stack(self, stack):
-        pass
-
-
-class WithDaemonTasks(WithAsyncExitStack):
-    async def _init_exit_stack(self, stack):
-        await super()._init_exit_stack(stack)
-        tasks = await stack.enter_async_context(anyio.create_task_group())
-        stack.callback(tasks.cancel_scope.cancel)
-        await self._start_daemon_tasks(tasks)
-
-    async def _start_daemon_tasks(self, tasks):
-        pass
-
-
 class StreamBuffer:
     def __init__(self, stream: anyio.abc.ByteStream):
         self._stream = stream
