@@ -321,7 +321,7 @@ class MpdClientHandlerBase(object):
         return ["%s\t\t%s"%(k,v['users']) for (k,v) in cls.__SupportedCommands.items() if v['class']!=None ]
 
 
-class MpdClientHandler(MpdClientHandlerBase, WithAsyncExitStack):
+class MpdClientHandler(MpdClientHandlerBase):
     """ Manage the connection from a mpd client. Each client
     connection instances this object."""
 
@@ -517,13 +517,13 @@ class MpdServer(object):
         async def handle_client(client):
             try:
                 async with client:
-                    async with self.ClientHandler(client, self, **client_kwargs) as handler:
-                        self.clients.add(handler)
-                        try:
-                            await handler.run()
-                        finally:
-                            self.clients.remove(handler)
-                            logger.debug("Client connection closed")
+                    handler = self.ClientHandler(client, self, **client_kwargs)
+                    self.clients.add(handler)
+                    try:
+                        await handler.run()
+                    finally:
+                        self.clients.remove(handler)
+                        logger.debug("Client connection closed")
             except (ConnectionError, anyio.BrokenResourceError):
                 pass
         listener = await _await_if_awaitable(listener)
