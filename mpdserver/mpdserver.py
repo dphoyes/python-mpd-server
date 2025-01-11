@@ -149,6 +149,7 @@ class MpdClientHandlerBase(object):
     def __init_subclass__(cls):
         super().__init_subclass__()
         cls.__SupportedCommands = {
+            'clearerror'       :{'class':None,'users':[],'group':'write','mpdVersion':"0.12",'neededBy':None},
             'currentsong'      :{'class':CurrentSong,'users':['default'],'group':'read','mpdVersion':"0.12",'neededBy':["sonata"]},
             'outputs'          :{'class':Outputs,'users':['default'],'group':'read','mpdVersion':"0.12",'neededBy':["gmpc"]},
             'enableoutput'     :{'class':None,'users':['default'],'group':'read','mpdVersion':"0.12",'neededBy':["gmpc"]},
@@ -211,6 +212,7 @@ class MpdClientHandlerBase(object):
             'crossfade'         :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'mixrampdb'         :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'mixrampdelay'         :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
+            'searchplaylist'            :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'listplaylist'            :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'listplaylists'            :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'load'            :{'class':None,'users':[],'group':'write','mpdVersion':"0.12",'neededBy':None},
@@ -220,6 +222,7 @@ class MpdClientHandlerBase(object):
             'search'            :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'searchadd'         :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'searchaddpl'       :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
+            'searchcount'       :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'update'       :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'rescan'       :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'rm'            :{'class':None,'users':[],'group':'write','mpdVersion':"0.12",'neededBy':None},
@@ -227,9 +230,14 @@ class MpdClientHandlerBase(object):
             'playlistadd'      :{'class':None,'users':[],'group':'write','mpdVersion':"0.12",'neededBy':None},
             'playlistclear'    :{'class':None,'users':[],'group':'write','mpdVersion':"0.12",'neededBy':None},
             'playlistdelete'   :{'class':None,'users':[],'group':'write','mpdVersion':"0.12",'neededBy':None},
+            'playlistlength'   :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'playlistmove'     :{'class':None,'users':[],'group':'write','mpdVersion':"0.12",'neededBy':None},
             'sticker'          :{'class':None,'users':[],'group':'write','mpdVersion':"0.12",'neededBy':None},
+            'stickernames'     :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
+            'stickertypes'     :{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
+            'stickernamestypes':{'class':None,'users':[],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'setvol'           :{'class':None,'users':[],'group':'control','mpdVersion':"0.12",'neededBy':None},
+            'getvol'           :{'class':None,'users':[],'group':'control','mpdVersion':"0.12",'neededBy':None},
             'volume'           :{'class':None,'users':[],'group':'control','mpdVersion':"0.12",'neededBy':None},
             'channels'         :{'class':None,'users':[],'group':'control','mpdVersion':"0.12",'neededBy':None},
             'mount'         :{'class':None,'users':[],'group':'control','mpdVersion':"0.12",'neededBy':None},
@@ -246,6 +254,8 @@ class MpdClientHandlerBase(object):
             'unsubscribe'         :{'class':None,'users':[],'group':'control','mpdVersion':"0.12",'neededBy':None},
             'readmessages'         :{'class':None,'users':[],'group':'control','mpdVersion':"0.12",'neededBy':None},
             'sendmessage'         :{'class':None,'users':[],'group':'control','mpdVersion':"0.12",'neededBy':None},
+            'binarylimit'           :{'class':None,'users':['default'],'group':'read','mpdVersion':"0.12",'neededBy':None},
+            'protocol'              :{'class':None,'users':['default'],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'urlhandlers'           :{'class':None,'users':['default'],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'listallinfo'           :{'class':None,'users':['default'],'group':'read','mpdVersion':"0.12",'neededBy':None},
             'replay_gain_mode'           :{'class':None,'users':['default'],'group':'write','mpdVersion':"0.12",'neededBy':None},
@@ -340,7 +350,7 @@ class MpdClientHandler(MpdClientHandlerBase):
         if self.partition is None:
             self.partition = self.server.partitions["default"]
 
-        await self.stream.send_all("OK MPD 0.22.0\n".encode('utf-8'))
+        await self.stream.send_all("OK MPD 0.24.0\n".encode('utf-8'))
 
         re_command_list_begin = re.compile(b"^command_list_(ok_)?begin\n$")
         re_line = re.compile(b"[^\n]+\n")
