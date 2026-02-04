@@ -542,7 +542,7 @@ class MpdServer(object):
                     finally:
                         self.clients.remove(handler)
                         logger.debug("Client connection closed")
-            except (ConnectionError, anyio.BrokenResourceError):
+            except* (ConnectionError, anyio.BrokenResourceError):
                 pass
         listener = await _await_if_awaitable(listener)
         await listener.serve(handle_client)
