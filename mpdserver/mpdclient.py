@@ -84,7 +84,7 @@ class MpdClient:
         super().__init__()
         self.host, self.port, self.default_partition = host, port, default_partition
         self.command_queue = anyio.streams.stapled.StapledObjectStream(
-            *anyio.create_memory_object_stream(1, item_type=CommandQueueItem)
+            *anyio.create_memory_object_stream[CommandQueueItem](1)
         )
         self.wake = anyio.Event()
         self.idle_consumers = set()
@@ -92,7 +92,10 @@ class MpdClient:
 
     @contextlib.asynccontextmanager
     async def __ContextManager(self):
-        async with anyio.create_task_group() as tasks:
+        async with (
+            self.command_queue,
+            anyio.create_task_group() as tasks,
+        ):
             await tasks.start(self._run)
             yield self
             tasks.cancel_scope.cancel()
@@ -223,19 +226,21 @@ class MpdClient:
                     yield tuple(changed)
         finally:
             self.idle_consumers.remove(consumer)
+            await consumer.result_q.aclose()
 
     async def raw_command(self, line, forwarding_mode=False):
         item = CommandQueueItem(line, forwarding_mode)
-        logger.debug("Sending command to queue: {}", line)
-        await self.command_queue.send(item)
-        self.wake.set()
-        while True:
-            result = await item.result_q.receive()
-            if result is None:
-                return
-            if isinstance(result, Exception):
-                raise result
-            yield result
+        async with item.result_q:
+            logger.debug("Sending command to queue: {}", line)
+            await self.command_queue.send(item)
+            self.wake.set()
+            while True:
+                result = await item.result_q.receive()
+                if result is None:
+                    return
+                if isinstance(result, Exception):
+                    raise result
+                yield result
 
     async def command_returning_list(self, cmd, key):
         async with contextlib.aclosing(parse_list(self.raw_command(cmd), key)) as iter_x:
